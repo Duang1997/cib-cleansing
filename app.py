@@ -9,7 +9,7 @@ from datetime import datetime
 # 1. การตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="ระบบแปลงข้อมูล", layout="centered")
 
-# 2. การตกแต่งด้วย CSS (สไตล์หน่วยงาน)
+# 2. การตกแต่งด้วย CSS 
 custom_css = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
@@ -47,7 +47,6 @@ BANK_PASSWORDS = {
 }
 
 def decrypt_excel(file_bytes, password):
-    """ปลดล็อกไฟล์ Excel ที่เข้ารหัส"""
     decrypted_file = io.BytesIO()
     try:
         office_file = msoffcrypto.OfficeFile(file_bytes)
@@ -59,7 +58,6 @@ def decrypt_excel(file_bytes, password):
         return None, False
 
 def convert_buddhist_year_string(dt):
-    """แปลง พ.ศ. เป็น ค.ศ. (A.D.) รูปแบบ dd/mm/yyyy"""
     if pd.isna(dt) or str(dt).strip().lower() in ['nan', 'nat', 'none', '']: return dt 
     if isinstance(dt, (pd.Timestamp, datetime)): 
         dt_str = dt.strftime('%d/%m/%Y')
@@ -72,17 +70,13 @@ def convert_buddhist_year_string(dt):
         m = int(match.group(2))
         year_part = int(match.group(3))
         
-        if year_part >= 2400:
-            year_christian = year_part - 543
-        elif 20 < year_part < 100:
-            year_christian = 2000 + year_part
-        else:
-            year_christian = year_part
+        if year_part >= 2400: year_christian = year_part - 543
+        elif 20 < year_part < 100: year_christian = 2000 + year_part
+        else: year_christian = year_part
             
         return f"{d:02d}/{m:02d}/{year_christian}"
     return dt 
 
-# ================= ฟังก์ชันประมวลผล KBANK =================
 def process_kbank(excel_file):
     excel_data = pd.ExcelFile(excel_file)
     dtype_spec = {'หมายเลขบัญชีต้นทาง': str, 'หมายเลขบัญชีปลายทาง': str}
@@ -196,7 +190,6 @@ def process_kbank(excel_file):
         
     return output.getvalue(), df_cleaned_ready
 
-# ================= ฟังก์ชันประมวลผล KTB =================
 def process_ktb(excel_file, account_number, account_name):
     df_full_raw = pd.read_excel(excel_file, sheet_name=0, header=None)
     df_data_map = df_full_raw.copy()
@@ -232,28 +225,20 @@ def process_ktb(excel_file, account_number, account_name):
     df_cleaned['ยอดเงิน'] = pd.to_numeric(df_data_map.get('จำนวนเงิน', pd.Series([0]*len(df_data_map))), errors='coerce').fillna(0)
     df_cleaned['จำนวนครั้ง'] = 1
 
-    # Logic ทิศทางการโอน
     cond_in = (df_cleaned['ประเภทรายการ'] == 'เงินโอนเข้า')
     df_cleaned.loc[cond_in, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'เงินโอนเข้า']
-
     cond_out = (df_cleaned['ประเภทรายการ'] == 'เงินโอนออก')
     df_cleaned.loc[cond_out, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'เงินโอนออก']
-
     cond_chq = (df_cleaned['ประเภทรายการ'] == 'ฝากเช็ค')
     df_cleaned.loc[cond_chq, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'ฝากเช็ค']
-
     cond_tr_out = (df_cleaned['ประเภทรายการ'] == 'โอนเงิน') & (df_cleaned['หมายเลขบัญชีต้นทาง'] == '') & (df_cleaned['หมายเลขบัญชีปลายทาง'] != '')
     df_cleaned.loc[cond_tr_out, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']] = ['KTB', account_number, account_name]
-
     cond_tr_in = (df_cleaned['ประเภทรายการ'] == 'โอนเงิน') & (df_cleaned['หมายเลขบัญชีปลายทาง'] == '') & (df_cleaned['หมายเลขบัญชีต้นทาง'] != '')
     df_cleaned.loc[cond_tr_in, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']] = ['KTB', account_number, account_name]
-
     cond_dep = (df_cleaned['ประเภทรายการ'] == 'ฝากเงิน')
     df_cleaned.loc[cond_dep, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'ฝากเงิน']
-
     cond_wit = (df_cleaned['ประเภทรายการ'] == 'ถอนเงิน')
     df_cleaned.loc[cond_wit, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'ถอนเงิน']
-
     cond_pay = (df_cleaned['ประเภทรายการ'] == 'ชำระเงิน')
     df_cleaned.loc[cond_pay, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'ชำระเงิน']
 
@@ -274,7 +259,6 @@ def process_ktb(excel_file, account_number, account_name):
         for r, row in df_cleaned.iterrows():
             acc_src = str(row['หมายเลขบัญชีต้นทาง']).strip()
             acc_dest = str(row['หมายเลขบัญชีปลายทาง']).strip()
-            
             amount_fmt = fmt_normal
             if acc_src == account_number: amount_fmt = fmt_red
             elif acc_dest == account_number: amount_fmt = fmt_green
@@ -288,7 +272,6 @@ def process_ktb(excel_file, account_number, account_name):
 
     return output.getvalue(), df_cleaned
 
-# ================= ฟังก์ชันประมวลผลธนาคารอื่นๆ (General) =================
 def process_general(excel_file):
     df_raw = pd.read_excel(excel_file)
     df_cleansed = df_raw.copy()
@@ -300,13 +283,13 @@ def process_general(excel_file):
         df_cleansed.to_excel(writer, index=False, sheet_name='Cleansed_Data')
     return output.getvalue(), df_cleansed
 
-# ================= ส่วนควบคุมหลัก (Main Controller) =================
 def process_and_allow_download(excel_file, bank_name, ktb_acc_num="", ktb_acc_name=""):
     st.write("---")
     st.subheader("3. การประมวลผล (Processing)")
     
     try:
-        if bank_name == "KB":
+        # **แก้ไขเงื่อนไขการตรวจสอบชื่อธนาคารตรงจุดนี้ครับ**
+        if bank_name == "KBANK":  
             st.info("กำลังประมวลผลข้อมูลตามโครงสร้างของธนาคารกสิกรไทย (KBANK)...")
             processed_data, df_show = process_kbank(excel_file)
         elif bank_name == "KTB":
@@ -352,7 +335,6 @@ def main():
         file_bytes = io.BytesIO(uploaded_file.read())
         is_encrypted = False
         
-        # ตรวจสอบการเข้ารหัส
         try:
             pd.read_excel(file_bytes, nrows=1)
             file_bytes.seek(0)
