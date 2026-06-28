@@ -4,12 +4,12 @@ import numpy as np
 import io
 import msoffcrypto
 import re
-from datetime import datetime
+import datetime
 
 # 1. การตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="ระบบแปลงข้อมูล", layout="centered")
 
-# 2. การตกแต่งด้วย CSS 
+# 2. การตกแต่งด้วย CSS (สไตล์ CIB)
 custom_css = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
@@ -30,23 +30,12 @@ st.markdown(custom_css, unsafe_allow_html=True)
 
 # 3. ฐานข้อมูลรหัสผ่านมาตรฐาน
 BANK_PASSWORDS = {
-    "KBANK": "2533*",
-    "SCB": "7512",
-    "KTB": "1263",
-    "BBL": None,
-    "BAY": None,
-    "TTB": None,
-    "UOB": None,
-    "CIMB": None,
-    "TISCO": None,
-    "KKP": None,
-    "GSB": None,
-    "BAAC": None,
-    "GHB": None,
-    "อื่นๆ": None
+    "ธนาคารกสิกรไทย (KBANK)": "2533*",
+    "ธนาคารกรุงไทย (KTB)": "1263"
 }
 
 def decrypt_excel(file_bytes, password):
+    """ฟังก์ชันสำหรับปลดล็อกไฟล์ Excel ที่ติดรหัสผ่าน"""
     decrypted_file = io.BytesIO()
     try:
         office_file = msoffcrypto.OfficeFile(file_bytes)
@@ -57,86 +46,81 @@ def decrypt_excel(file_bytes, password):
     except Exception:
         return None, False
 
-def convert_buddhist_year_string(dt):
-    if pd.isna(dt) or str(dt).strip().lower() in ['nan', 'nat', 'none', '']: return dt 
-    if isinstance(dt, (pd.Timestamp, datetime)): 
-        dt_str = dt.strftime('%d/%m/%Y')
-    else:
-        dt_str = str(dt).strip()
-    
-    match = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})', dt_str)
-    if match:
-        d = int(match.group(1))
-        m = int(match.group(2))
-        year_part = int(match.group(3))
-        
-        if year_part >= 2400: year_christian = year_part - 543
-        elif 20 < year_part < 100: year_christian = 2000 + year_part
-        else: year_christian = year_part
-            
-        return f"{d:02d}/{m:02d}/{year_christian}"
-    return dt 
-
+# ==========================================
+# ส่วนประมวลผล KBANK
+# ==========================================
 def process_kbank(excel_file):
     excel_data = pd.ExcelFile(excel_file)
     dtype_spec = {'หมายเลขบัญชีต้นทาง': str, 'หมายเลขบัญชีปลายทาง': str}
     df_for_clean = pd.read_excel(excel_data, sheet_name=0, header=3, dtype=dtype_spec)
     df_original_copy = pd.read_excel(excel_data, sheet_name=0, header=None)
-
     raw_cell_text = str(df_original_copy.iloc[1, 0]).strip() 
     
-    def extract_account_number(text):
-        text_cleaned = text.upper()
-        if 'หมายเลขบัญชี' in text_cleaned: text_cleaned = text_cleaned.split('หมายเลขบัญชี', 1)[-1].strip()
-        if ':' in text_cleaned: text_cleaned = text_cleaned.split(':', 1)[-1].strip()
-        match = re.search(r'([\d-]{5,})', text_cleaned)
-        if match: return match.group(0).replace('-', '').replace(' ', '').strip()
-        return 'PARSE_ERROR'
+    def extract_acc_num(text):
+        t = text.upper()
+        if 'หมายเลขบัญชี' in t: t = t.split('หมายเลขบัญชี', 1)[-1].strip()
+        if ':' in t: t = t.split(':', 1)[-1].strip()
+        match = re.search(r'([\d-]{5,})', t)
+        return match.group(0).replace('-', '').replace(' ', '').strip() if match else 'PARSE_ERROR'
 
-    def extract_account_name(text):
-        text_cleaned = str(text).upper().strip()
-        if not text_cleaned or text_cleaned == 'NAN': return '' 
-        match = re.search(r'(?:ชื่อบัญชี|ชื่อบัญชี\s*:\s*)(.*?)(?=สาขา|BRANCH)', text_cleaned, re.IGNORECASE)
+    def extract_acc_name(text):
+        t = str(text).upper().strip()
+        if not t or t in ['NAN', 'NONE']: return '' 
+        match = re.search(r'(?:ชื่อบัญชี|ชื่อบัญชี\s*:\s*)(.*?)(?=สาขา|BRANCH)', t, re.IGNORECASE)
         if match: return match.group(1).strip()
-        if 'ชื่อบัญชี' in text_cleaned: return text_cleaned.split('ชื่อบัญชี', 1)[-1].strip().split(':', 1)[-1].strip()
+        if 'ชื่อบัญชี' in t: return t.split('ชื่อบัญชี', 1)[-1].strip().split(':', 1)[-1].strip()
         return '' 
         
-    kbank_acc_num = extract_account_number(raw_cell_text)
-    kbank_acc_name = extract_account_name(raw_cell_text)
-    if not kbank_acc_name or kbank_acc_name in ['PARSE_ERROR', '']:
-        kbank_acc_name = kbank_acc_num if kbank_acc_num != 'PARSE_ERROR' else 'KBANK_ACCOUNT'
+    kbank_acc_num = extract_acc_num(raw_cell_text)
+    kbank_acc_name = extract_acc_name(raw_cell_text)
+    if not kbank_acc_name or kbank_acc_name.strip() in ['PARSE_ERROR', '']:
+        kbank_acc_name = kbank_acc_num if (kbank_acc_num != 'PARSE_ERROR' and kbank_acc_num.strip() != '') else 'KBANK_ACCOUNT'
+
+    def convert_date(dt):
+        if pd.isna(dt) or dt == '': return dt 
+        dt_str = dt.strftime('%d/%m/%Y') if isinstance(dt, (pd.Timestamp, datetime.datetime)) else str(dt)
+        match = re.search(r'(\d{1,2}[/-]\d{1,2}[/-])(\d{2,4})', dt_str)
+        if match:
+            date_prefix = match.group(1).replace('-', '/')
+            yb = int(match.group(2))
+            if yb >= 2400: yc = yb - 543
+            elif yb < 100 and yb > 20: yc = 2000 + yb
+            else: yc = yb
+            return date_prefix + str(yc)
+        return dt 
 
     if 'วันที่ทำรายการ' in df_for_clean.columns:
-        df_for_clean['วันที่ทำรายการ'] = df_for_clean['วันที่ทำรายการ'].apply(convert_buddhist_year_string)
+        df_for_clean['วันที่ทำรายการ'] = df_for_clean['วันที่ทำรายการ'].apply(convert_date)
         df_for_clean['วันที่ทำรายการ'] = pd.to_datetime(df_for_clean['วันที่ทำรายการ'], format='%d/%m/%Y', errors='coerce')
 
     if 'ฝากเงิน' in df_for_clean.columns and 'ประเภทรายการ' in df_for_clean.columns:
-        is_acc_empty = df_for_clean['หมายเลขบัญชีต้นทาง'].apply(lambda x: str(x).strip() in ['', 'NAN', 'nan'])
+        is_acc_empty = df_for_clean['หมายเลขบัญชีต้นทาง'].astype(str).str.strip().isin(['', 'NAN', 'nan'])
         deposit_numeric = pd.to_numeric(df_for_clean['ฝากเงิน'], errors='coerce').fillna(0)
-        mask_fill_type = is_acc_empty & (deposit_numeric != 0)
-        df_for_clean.loc[mask_fill_type, 'หมายเลขบัญชีต้นทาง'] = df_for_clean['ประเภทรายการ']
+        df_for_clean.loc[is_acc_empty & (deposit_numeric != 0), 'หมายเลขบัญชีต้นทาง'] = df_for_clean['ประเภทรายการ']
 
-    source_cols = ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']
     if 'ถอนเงิน' in df_for_clean.columns:
+        source_cols = ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']
         is_source_empty = df_for_clean[source_cols].apply(lambda col: col.astype(str).str.strip().eq('') | col.isna()).all(axis=1)
         withdraw_numeric = pd.to_numeric(df_for_clean['ถอนเงิน'], errors='coerce').fillna(0)
-        mask_fill_source = is_source_empty & (withdraw_numeric != 0)
-        df_for_clean.loc[mask_fill_source, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']] = ['KBANK', kbank_acc_num, kbank_acc_name]
+        mask = is_source_empty & (withdraw_numeric != 0)
+        df_for_clean.loc[mask, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']] = ['KBANK', kbank_acc_num, kbank_acc_name]
 
-    if 'ถอนเงิน' in df_for_clean.columns and 'ประเภทรายการ' in df_for_clean.columns:
-        is_acc_empty_dest = df_for_clean['หมายเลขบัญชีปลายทาง'].apply(lambda x: str(x).strip() in ['', 'NAN', 'nan'])
-        mask_fill_type_dest = is_acc_empty_dest & (withdraw_numeric != 0)
-        df_for_clean.loc[mask_fill_type_dest, 'หมายเลขบัญชีปลายทาง'] = df_for_clean['ประเภทรายการ']
+        if 'ประเภทรายการ' in df_for_clean.columns:
+            is_acc_empty_dest = df_for_clean['หมายเลขบัญชีปลายทาง'].astype(str).str.strip().isin(['', 'NAN', 'nan'])
+            df_for_clean.loc[is_acc_empty_dest & (withdraw_numeric != 0), 'หมายเลขบัญชีปลายทาง'] = df_for_clean['ประเภทรายการ']
 
-    dest_cols = ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']
     if 'ฝากเงิน' in df_for_clean.columns:
+        dest_cols = ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']
         is_dest_empty = df_for_clean[dest_cols].apply(lambda col: col.astype(str).str.strip().eq('') | col.isna()).all(axis=1)
-        mask_fill_dest = is_dest_empty & (deposit_numeric != 0)
-        df_for_clean.loc[mask_fill_dest, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']] = ['KBANK', kbank_acc_num, kbank_acc_name]
+        mask = is_dest_empty & (deposit_numeric != 0)
+        df_for_clean.loc[mask, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']] = ['KBANK', kbank_acc_num, kbank_acc_name]
 
-    new_columns = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_columns = [
+        'วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง',
+        'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง',
+        'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง'
+    ]
     df_cleaned = pd.DataFrame(columns=new_columns)
-    
     for col in [c for c in new_columns if c not in ['ยอดเงิน', 'จำนวนครั้ง']]:
         if col in df_for_clean.columns:
             if col == 'วันที่ทำรายการ':
@@ -147,12 +131,12 @@ def process_kbank(excel_file):
             else:
                 df_cleaned[col] = df_for_clean[col]
 
+    source_column = '_source_type'
     if 'ฝากเงิน' in df_for_clean.columns and 'ถอนเงิน' in df_for_clean.columns:
         df_cleaned['ยอดเงิน'] = np.where(deposit_numeric != 0, deposit_numeric, withdraw_numeric)
-        df_cleaned['_source_type'] = np.where(deposit_numeric != 0, 'DEPOSIT', 'WITHDRAW')
+        df_cleaned[source_column] = np.where(deposit_numeric != 0, 'DEPOSIT', 'WITHDRAW')
     else:
-        df_cleaned['ยอดเงิน'] = 0 
-        df_cleaned['_source_type'] = 'UNKNOWN'
+        df_cleaned['ยอดเงิน'], df_cleaned[source_column] = 0, 'UNKNOWN'
         
     df_cleaned['จำนวนครั้ง'] = 1
     df_cleaned['ยอดเงิน'] = df_cleaned['ยอดเงิน'].replace([np.inf, -np.inf], np.nan)
@@ -160,43 +144,48 @@ def process_kbank(excel_file):
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_original_copy.to_excel(writer, sheet_name='Original', index=False, header=False)
-        worksheet_cleaned = writer.book.add_worksheet('Cleaned Data')
+        df_original_copy.to_excel(writer, sheet_name='Sheet1 (Original Copy)', index=False, header=False)
+        worksheet_cleaned = writer.book.add_worksheet('Sheet2 (Cleaned Data)')
         
         green_fmt = writer.book.add_format({'font_color': 'green', 'num_format': '#,##0.00'})
         red_fmt = writer.book.add_format({'font_color': 'red', 'num_format': '#,##0.00'})
-        default_fmt = writer.book.add_format({'num_format': 'General'})
+        def_fmt = writer.book.add_format({'num_format': 'General'})
         date_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'}) 
-        txt_fmt = writer.book.add_format({'num_format': '@'})
 
-        for col_num, value in enumerate(new_columns): worksheet_cleaned.write(0, col_num, value, default_fmt)
+        for col_num, value in enumerate(new_columns): worksheet_cleaned.write(0, col_num, value, def_fmt)
 
         for row_num, row_data in df_cleaned_ready.iterrows():
             source = row_data['_source_type']
             for col_num, col_name in enumerate(new_columns):
-                cell_val = row_data[col_name]
+                cell_value = row_data[col_name]
                 if col_name == 'ยอดเงิน':
                     fmt = green_fmt if source == 'DEPOSIT' else red_fmt
-                    if cell_val != '' and pd.notna(cell_val): worksheet_cleaned.write_number(row_num + 1, col_num, cell_val, fmt)
-                    else: worksheet_cleaned.write_blank(row_num + 1, col_num, '', default_fmt)
-                elif col_name == 'วันที่ทำรายการ' and cell_val != '':
-                    if isinstance(cell_val, (pd.Timestamp, datetime)): worksheet_cleaned.write_datetime(row_num + 1, col_num, cell_val, date_fmt)
-                    else: worksheet_cleaned.write(row_num + 1, col_num, cell_val, default_fmt)
-                elif col_name in ['หมายเลขบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']:
-                    worksheet_cleaned.write_string(row_num + 1, col_num, str(cell_val), txt_fmt)
-                else:
-                    worksheet_cleaned.write(row_num + 1, col_num, cell_val, default_fmt)
+                    if cell_value != '' and pd.notna(cell_value): worksheet_cleaned.write_number(row_num + 1, col_num, cell_value, fmt)
+                    else: worksheet_cleaned.write_blank(row_num + 1, col_num, '', def_fmt)
+                elif col_name == 'วันที่ทำรายการ' and cell_value != '':
+                    if isinstance(cell_value, (pd.Timestamp, datetime.datetime)): worksheet_cleaned.write_datetime(row_num + 1, col_num, cell_value, date_fmt)
+                    else: worksheet_cleaned.write(row_num + 1, col_num, cell_value, def_fmt)
+                else: worksheet_cleaned.write(row_num + 1, col_num, cell_value, def_fmt)
         worksheet_cleaned.autofit()
         
     return output.getvalue(), df_cleaned_ready
 
+# ==========================================
+# ส่วนประมวลผล KTB
+# ==========================================
 def process_ktb(excel_file, account_number, account_name):
     df_full_raw = pd.read_excel(excel_file, sheet_name=0, header=None)
+    
     df_data_map = df_full_raw.copy()
     df_data_map.columns = df_data_map.iloc[0].astype(str).str.strip().str.replace(r'[\s\n-]', '', regex=True).str.lower()
     df_data_map = df_data_map[1:].reset_index(drop=True)
     
-    new_columns = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_columns = [
+        'วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง',
+        'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง',
+        'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง',
+        'ยอดเงิน', 'จำนวนครั้ง'
+    ]
     df_cleaned = pd.DataFrame(index=df_data_map.index, columns=new_columns)
 
     def force_clean_text(val):
@@ -204,10 +193,26 @@ def process_ktb(excel_file, account_number, account_name):
         return '' if s.lower() in ['nan', 'none', 'nat', ''] else s
 
     def pad_account_number(val):
-        s = force_clean_text(val).split('.')[0]
+        s = force_clean_text(val)
+        if s == '': return ''
+        s = s.split('.')[0]
         return s.zfill(10) if s.isdigit() else s
 
-    df_cleaned['วันที่ทำรายการ'] = df_data_map.get('วันที่', pd.Series(dtype=str)).apply(convert_buddhist_year_string)
+    def convert_date_thai_to_eng(val):
+        if pd.isna(val) or str(val).lower() == 'nan': return ''
+        d, m, y = None, None, None
+        if isinstance(val, (pd.Timestamp, datetime.datetime)):
+            d, m, y = val.day, val.month, val.year
+        else:
+            match = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', str(val).strip())
+            if match: d, m, y = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        
+        if d and m and y:
+            if y > 2400: y -= 543
+            return f"{d:02d}/{m:02d}/{y}"
+        return str(val)
+
+    df_cleaned['วันที่ทำรายการ'] = df_data_map.get('วันที่', pd.Series(dtype=str)).apply(convert_date_thai_to_eng)
     df_cleaned['เวลาที่ทำรายการ'] = df_data_map.get('เวลา', pd.Series(dtype=str)).apply(force_clean_text)
     df_cleaned['ประเภทรายการ'] = df_data_map.get('รายการ', pd.Series(dtype=str)).apply(force_clean_text)
     df_cleaned['ช่องทาง'] = df_data_map.get('สถานที่', pd.Series(dtype=str)).apply(force_clean_text)
@@ -222,25 +227,34 @@ def process_ktb(excel_file, account_number, account_name):
 
     df_cleaned['ชื่อบัญชีต้นทาง'] = ''
     df_cleaned['ชื่อบัญชีปลายทาง'] = ''
-    df_cleaned['ยอดเงิน'] = pd.to_numeric(df_data_map.get('จำนวนเงิน', pd.Series([0]*len(df_data_map))), errors='coerce').fillna(0)
+    amt_col = df_data_map.get('จำนวนเงิน', pd.Series([0]*len(df_data_map)))
+    df_cleaned['ยอดเงิน'] = pd.to_numeric(amt_col, errors='coerce').fillna(0)
     df_cleaned['จำนวนครั้ง'] = 1
 
-    cond_in = (df_cleaned['ประเภทรายการ'] == 'เงินโอนเข้า')
-    df_cleaned.loc[cond_in, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'เงินโอนเข้า']
-    cond_out = (df_cleaned['ประเภทรายการ'] == 'เงินโอนออก')
-    df_cleaned.loc[cond_out, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'เงินโอนออก']
-    cond_chq = (df_cleaned['ประเภทรายการ'] == 'ฝากเช็ค')
-    df_cleaned.loc[cond_chq, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'ฝากเช็ค']
-    cond_tr_out = (df_cleaned['ประเภทรายการ'] == 'โอนเงิน') & (df_cleaned['หมายเลขบัญชีต้นทาง'] == '') & (df_cleaned['หมายเลขบัญชีปลายทาง'] != '')
-    df_cleaned.loc[cond_tr_out, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']] = ['KTB', account_number, account_name]
-    cond_tr_in = (df_cleaned['ประเภทรายการ'] == 'โอนเงิน') & (df_cleaned['หมายเลขบัญชีปลายทาง'] == '') & (df_cleaned['หมายเลขบัญชีต้นทาง'] != '')
-    df_cleaned.loc[cond_tr_in, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']] = ['KTB', account_number, account_name]
-    cond_dep = (df_cleaned['ประเภทรายการ'] == 'ฝากเงิน')
-    df_cleaned.loc[cond_dep, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'ฝากเงิน']
-    cond_wit = (df_cleaned['ประเภทรายการ'] == 'ถอนเงิน')
-    df_cleaned.loc[cond_wit, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'ถอนเงิน']
-    cond_pay = (df_cleaned['ประเภทรายการ'] == 'ชำระเงิน')
-    df_cleaned.loc[cond_pay, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'ชำระเงิน']
+    # Logic การอัปเดตข้อมูลทิศทางการโอน
+    c_in = (df_cleaned['ประเภทรายการ'] == 'เงินโอนเข้า')
+    df_cleaned.loc[c_in, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'เงินโอนเข้า']
+
+    c_out = (df_cleaned['ประเภทรายการ'] == 'เงินโอนออก')
+    df_cleaned.loc[c_out, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'เงินโอนออก']
+
+    c_chq = (df_cleaned['ประเภทรายการ'] == 'ฝากเช็ค')
+    df_cleaned.loc[c_chq, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'ฝากเช็ค']
+
+    c_tr_out = (df_cleaned['ประเภทรายการ'] == 'โอนเงิน') & (df_cleaned['หมายเลขบัญชีต้นทาง'] == '') & (df_cleaned['หมายเลขบัญชีปลายทาง'] != '')
+    df_cleaned.loc[c_tr_out, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง']] = ['KTB', account_number, account_name]
+
+    c_tr_in = (df_cleaned['ประเภทรายการ'] == 'โอนเงิน') & (df_cleaned['หมายเลขบัญชีปลายทาง'] == '') & (df_cleaned['หมายเลขบัญชีต้นทาง'] != '')
+    df_cleaned.loc[c_tr_in, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']] = ['KTB', account_number, account_name]
+
+    c_dep = (df_cleaned['ประเภทรายการ'] == 'ฝากเงิน')
+    df_cleaned.loc[c_dep, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'หมายเลขบัญชีต้นทาง']] = ['KTB', account_number, account_name, 'ฝากเงิน']
+
+    c_wit = (df_cleaned['ประเภทรายการ'] == 'ถอนเงิน')
+    df_cleaned.loc[c_wit, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'ถอนเงิน']
+
+    c_pay = (df_cleaned['ประเภทรายการ'] == 'ชำระเงิน')
+    df_cleaned.loc[c_pay, ['ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']] = ['KTB', account_number, account_name, 'ชำระเงิน']
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -257,11 +271,8 @@ def process_ktb(excel_file, account_number, account_name):
         for col, val in enumerate(df_cleaned.columns): ws.write(0, col, val, fmt_head)
 
         for r, row in df_cleaned.iterrows():
-            acc_src = str(row['หมายเลขบัญชีต้นทาง']).strip()
-            acc_dest = str(row['หมายเลขบัญชีปลายทาง']).strip()
-            amount_fmt = fmt_normal
-            if acc_src == account_number: amount_fmt = fmt_red
-            elif acc_dest == account_number: amount_fmt = fmt_green
+            acc_src, acc_dest = str(row['หมายเลขบัญชีต้นทาง']).strip(), str(row['หมายเลขบัญชีปลายทาง']).strip()
+            amount_fmt = fmt_red if acc_src == account_number else (fmt_green if acc_dest == account_number else fmt_normal)
 
             for c, (col_name, val) in enumerate(row.items()):
                 if col_name == 'ยอดเงิน': ws.write_number(r+1, c, float(val), amount_fmt)
@@ -272,6 +283,9 @@ def process_ktb(excel_file, account_number, account_name):
 
     return output.getvalue(), df_cleaned
 
+# ==========================================
+# ส่วนประมวลผลพื้นฐาน
+# ==========================================
 def process_general(excel_file):
     df_raw = pd.read_excel(excel_file)
     df_cleansed = df_raw.copy()
@@ -283,50 +297,59 @@ def process_general(excel_file):
         df_cleansed.to_excel(writer, index=False, sheet_name='Cleansed_Data')
     return output.getvalue(), df_cleansed
 
+# ==========================================
+# ส่วนเชื่อมต่อ (Controller)
+# ==========================================
 def process_and_allow_download(excel_file, bank_name, ktb_acc_num="", ktb_acc_name=""):
     st.write("---")
     st.subheader("3. การประมวลผล (Processing)")
     
     try:
-        # **แก้ไขเงื่อนไขการตรวจสอบชื่อธนาคารตรงจุดนี้ครับ**
-        if bank_name == "KBANK":  
-            st.info("กำลังประมวลผลข้อมูลตามโครงสร้างของธนาคารกสิกรไทย (KBANK)...")
+        if bank_name == "ธนาคารกสิกรไทย (KBANK)":
+            st.info("กำลังประมวลผลข้อมูลโครงสร้างของธนาคารกสิกรไทย (KBANK)...")
             processed_data, df_show = process_kbank(excel_file)
-        elif bank_name == "KTB":
-            if not ktb_acc_num or not ktb_acc_name:
-                st.warning("ระบบไม่สามารถประมวลผลได้ กรุณากรอก 'หมายเลขบัญชีหลัก' และ 'ชื่อบัญชีหลัก' ด้านบนให้ครบถ้วน")
-                return
-            st.info("กำลังประมวลผลข้อมูลตามโครงสร้างของธนาคารกรุงไทย (KTB)...")
+        elif bank_name == "ธนาคารกรุงไทย (KTB)":
+            st.info("กำลังประมวลผลข้อมูลโครงสร้างของธนาคารกรุงไทย (KTB)...")
             processed_data, df_show = process_ktb(excel_file, ktb_acc_num, ktb_acc_name)
         else:
-            st.info(f"กำลังประมวลผลข้อมูลโครงสร้างพื้นฐานสำหรับ {bank_name}...")
+            st.info("กำลังประมวลผลข้อมูลโครงสร้างพื้นฐาน...")
             processed_data, df_show = process_general(excel_file)
 
         st.write("ตัวอย่างข้อมูลที่ประมวลผลแล้ว (5 แถวแรก):")
-        display_df = df_show.drop(columns=['_source_type']) if '_source_type' in df_show.columns else df_show
-        st.dataframe(display_df.head())
+        if '_source_type' in df_show.columns: st.dataframe(df_show.drop(columns=['_source_type']).head())
+        else: st.dataframe(df_show.head())
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         st.download_button(
             label="ดาวน์โหลดไฟล์ Excel (Export)",
             data=processed_data,
-            file_name=f"Cleaned_{bank_name}_{timestamp}.xlsx",
+            file_name=f"Cleaned_{bank_name.split()[0]}_{timestamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผล: {e}")
 
+# ==========================================
+# หน้าจอหลัก
+# ==========================================
 def main():
     st.title("DATA CLEANSING SYSTEM")
 
     st.subheader("1. เลือกธนาคาร")
     selected_bank = st.selectbox("ระบุธนาคารเจ้าของไฟล์:", list(BANK_PASSWORDS.keys()))
 
+    # รับข้อมูลเฉพาะสำหรับ KTB 
     ktb_acc_num, ktb_acc_name = "", ""
-    if selected_bank == "KTB":
-        st.info("โปรดระบุข้อมูลบัญชีหลักเพื่อใช้ประมวลผลทิศทางการโอนเงิน และจัดรูปแบบสียอดเงิน")
-        ktb_acc_num = st.text_input("หมายเลขบัญชีหลัก (10 หลัก):", max_chars=10)
-        ktb_acc_name = st.text_input("ชื่อบัญชีหลัก:")
+    if selected_bank == "ธนาคารกรุงไทย (KTB)":
+        st.info("⚠️ สำหรับธนาคารกรุงไทย (KTB) จำเป็นต้องระบุข้อมูลบัญชีหลักเพื่อใช้กำหนดทิศทางการโอนเงินและสี")
+        col1, col2 = st.columns(2)
+        with col1: ktb_acc_num = st.text_input("หมายเลขบัญชีหลัก (10 หลัก):", max_chars=10)
+        with col2: ktb_acc_name = st.text_input("ชื่อบัญชีหลัก:")
+        
+        # บล็อกไม่ให้ดำเนินการต่อจนกว่าจะกรอกครบ (ทำหน้าที่เสมือน Pop-up บังคับ)
+        if not ktb_acc_num or not ktb_acc_name:
+            st.warning("กรุณากรอก 'หมายเลขบัญชีหลัก' และ 'ชื่อบัญชีหลัก' ให้ครบถ้วนก่อนทำการอัปโหลดไฟล์")
+            st.stop()
 
     st.subheader("2. นำเข้าข้อมูล (Import)")
     uploaded_file = st.file_uploader("ลากไฟล์ Excel มาวาง หรือคลิกเพื่อเลือกไฟล์ (รองรับสูงสุด 2GB)", type=['xlsx', 'xls'])
