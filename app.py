@@ -67,7 +67,6 @@ def fix_and_validate_headers(df, expected_headers):
         if n_ex in norm_current:
             mapping[norm_current[n_ex]] = ex
         else:
-            # ใช้ difflib หาคำที่คล้ายคลึงที่สุด (ความแม่นยำขั้นต่ำ 60%)
             matches = difflib.get_close_matches(n_ex, norm_current.keys(), n=1, cutoff=0.6)
             if matches:
                 matched_col = norm_current[matches[0]]
@@ -105,7 +104,6 @@ def process_kbank(excel_file):
     df_for_clean = pd.read_excel(excel_data, sheet_name=0, header=3, dtype=dtype_spec)
     df_original_copy = pd.read_excel(excel_data, sheet_name=0, header=None)
 
-    # 1. ตรวจสอบและแก้ไขหัวตาราง KBANK อัตโนมัติ
     expected_headers = ['วันที่ทำรายการ', 'ประเภทรายการ', 'ฝากเงิน', 'ถอนเงิน']
     missing, renamed = fix_and_validate_headers(df_for_clean, expected_headers)
     
@@ -225,7 +223,6 @@ def process_ktb(excel_file, account_number, account_name):
     df_data_map.columns = df_data_map.iloc[0].astype(str).str.strip().str.replace(r'[\s\n-]', '', regex=True).str.lower()
     df_data_map = df_data_map[1:].reset_index(drop=True)
     
-    # 1. ตรวจสอบและแก้ไขหัวตาราง KTB อัตโนมัติ
     expected_headers = ['วันที่', 'เวลา', 'รายการ', 'สถานที่', 'จำนวนเงิน']
     missing, renamed = fix_and_validate_headers(df_data_map, expected_headers)
     
@@ -314,7 +311,7 @@ def process_ttb(excel_file):
     raw_df_original = pd.read_excel(excel_file)
     raw_df = pd.read_excel(excel_file, dtype=str, keep_default_na=False)
 
-    # 1. ตรวจสอบและแก้ไขหัวตาราง TTB อัตโนมัติ
+    # 1. ตรวจสอบและแก้ไขหัวตาราง TTB อัตโนมัติ (ข้ามชื่อบัญชีไปตรวจแบบยืดหยุ่นภายหลัง)
     expected_headers = ['DATE', 'TIME', 'TYPE', 'CHANNEL', 'FROM BANK CODE', 'FROM ACCOUNT NO', 'TO BANK CODE', 'TO ACCOUNT NO', 'DEPOSIT', 'WITHDRAWAL']
     missing, renamed = fix_and_validate_headers(raw_df, expected_headers)
     
@@ -330,6 +327,17 @@ def process_ttb(excel_file):
         code_str = str(code).strip().replace('.0', '').zfill(3)
         return bank_mapping.get(code_str, code_str)
 
+    # 2. ฟังก์ชันค้นหาคอลัมน์ชื่อบัญชีแบบยืดหยุ่น (ตัดช่องว่างและตัวพิมพ์เล็ก-ใหญ่) ครอบคลุม TTB
+    def find_col_flexible(df, target_name):
+        target_norm = target_name.replace(' ', '').lower()
+        for col in df.columns:
+            if str(col).replace(' ', '').replace('\n', '').replace('-', '').lower() == target_norm:
+                return col
+        return None
+
+    from_name_col = find_col_flexible(raw_df, 'fromaccountname')
+    to_name_col = find_col_flexible(raw_df, 'toaccountname')
+
     clean_df = pd.DataFrame()
     clean_df['วันที่ทำรายการ'] = raw_df.get('DATE', pd.Series(dtype=str)).apply(convert_buddhist_year_string)
     clean_df['เวลาที่ทำรายการ'] = raw_df.get('TIME', pd.Series(dtype=str)).astype(str).replace('nan', '')
@@ -339,12 +347,14 @@ def process_ttb(excel_file):
     clean_df['ชื่อธนาคารต้นทาง'] = raw_df.get('FROM BANK CODE', pd.Series(dtype=str)).apply(map_bank)
     clean_df['หมายเลขบัญชีต้นทาง'] = raw_df.get('FROM ACCOUNT NO', pd.Series(dtype=str)).astype(str).replace('nan', '')
     
-    if 'FROMA CCOUNT NAME' in raw_df.columns: clean_df['ชื่อบัญชีต้นทาง'] = raw_df['FROMA CCOUNT NAME'].astype(str).replace('nan', '')
-    else: clean_df['ชื่อบัญชีต้นทาง'] = raw_df.get('FROM ACCOUNT NAME', pd.Series(dtype=str)).astype(str).replace('nan', '')
+    # ใช้งานคอลัมน์ที่ค้นหาด้วยระบบ Flexible Matching
+    clean_df['ชื่อบัญชีต้นทาง'] = raw_df[from_name_col].astype(str).replace('nan', '') if from_name_col else ""
     
     clean_df['ชื่อธนาคารปลายทาง'] = raw_df.get('TO BANK CODE', pd.Series(dtype=str)).apply(map_bank)
     clean_df['หมายเลขบัญชีปลายทาง'] = raw_df.get('TO ACCOUNT NO', pd.Series(dtype=str)).astype(str).replace('nan', '')
-    clean_df['ชื่อบัญชีปลายทาง'] = raw_df.get('TO ACCOUNT NAME', pd.Series(dtype=str)).astype(str).replace('nan', '')
+    
+    # ใช้งานคอลัมน์ที่ค้นหาด้วยระบบ Flexible Matching
+    clean_df['ชื่อบัญชีปลายทาง'] = raw_df[to_name_col].astype(str).replace('nan', '') if to_name_col else ""
 
     clean_df['หมายเลขบัญชีต้นทาง'] = clean_df['หมายเลขบัญชีต้นทาง'].replace('', pd.NA).fillna(clean_df['ประเภทรายการ'])
     clean_df['หมายเลขบัญชีปลายทาง'] = clean_df['หมายเลขบัญชีปลายทาง'].replace('', pd.NA).fillna(clean_df['ประเภทรายการ'])
@@ -426,7 +436,6 @@ def process_and_allow_download(excel_file, bank_name, ktb_acc_num="", ktb_acc_na
             st.error("ไม่พบโครงสร้างการประมวลผลของธนาคารนี้")
             return
 
-        # แสดงข้อความแจ้งเตือนหากมีการเปลี่ยนชื่อหัวตารางอัตโนมัติ
         if warn_msg:
             st.warning(warn_msg)
 
@@ -442,7 +451,6 @@ def process_and_allow_download(excel_file, bank_name, ktb_acc_num="", ktb_acc_na
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     except ValueError as ve:
-        # ดักจับและแสดง Error การเช็คหัวตารางให้เป็นสีแดงชัดเจน
         st.error(str(ve))
         return
     except Exception as e:
