@@ -82,6 +82,7 @@ BANK_PASSWORDS = {
     "ธนาคารทหารไทยธนชาต (TTB)": "Ttb@011",
     "ธนาคารกรุงเทพ (BBL)": None,
     "ธนาคารออมสิน (GSB)": None,
+    "ธนาคารกรุงศรีอยุธยา (BAY)": None,
     "ระบบประสาน (PRASAN)": None
 }
 
@@ -186,22 +187,31 @@ def _parse_dates(series):
         return str(convert_buddhist_year_string(v)).strip()
     return pd.to_datetime(series.apply(to_text), format='%d/%m/%Y', errors='coerce')
 
+def _display_acc(val):
+    """เลขบัญชีสำหรับแสดงผล/จัดกลุ่ม: ตัดขีด เว้นวรรค .0 แต่คงเลข 0 นำหน้าไว้"""
+    t = re.sub(r'\.0$', '', _clean_text(val))
+    compact = re.sub(r'[\s-]', '', t)
+    return compact if compact.isdigit() else t
+
 def detect_main_account(df):
     """หาเลขบัญชีหลักจากเลขบัญชีที่ปรากฏบ่อยที่สุดทั้งฝั่งต้นทางและปลายทาง"""
     accs = pd.concat([df['หมายเลขบัญชีต้นทาง'], df['หมายเลขบัญชีปลายทาง']]).map(_clean_text)
     accs = accs[accs.str.replace(r'[\s-]', '', regex=True).str.fullmatch(r'\d{6,}')]
     return accs.mode().iloc[0] if not accs.empty else ''
 
-def build_flow_tables(df, main_account=None):
+def build_flow_tables(df, main_account=None, owner_col=None, owner_name_col=None, direction_col=None):
     """
     สร้างตารางสรุปบัญชีคู่โอนจาก Cleaned Data
-    - โอนเข้า: แถวที่บัญชีปลายทางเป็นบัญชีหลัก → สรุปตามบัญชีต้นทาง
-    - โอนออก: แถวที่บัญชีต้นทางเป็นบัญชีหลัก → สรุปตามบัญชีปลายทาง
-    คืนค่า dict: inflow, outflow (DataFrame), both (set บัญชีที่มีทั้งเข้าและออก), main_account
-    """
-    main_account = _clean_text(main_account) or detect_main_account(df)
-    main_key = _account_key(main_account)
 
+    โหมดบัญชีหลักเดียว (KBANK, KTB, SCB, TTB, BBL, GSB):
+      - โอนเข้า = แถวที่บัญชีปลายทางเป็นบัญชีหลัก → สรุปตามบัญชีต้นทาง
+      - โอนออก = แถวที่บัญชีต้นทางเป็นบัญชีหลัก → สรุปตามบัญชีปลายทาง
+    โหมดบัญชีเจ้าของรายแถว (PRASAN - ไฟล์เดียวอาจมีหลายบัญชี):
+      - ใช้ owner_col เป็นบัญชีเจ้าของของแต่ละแถว และ direction_col (DEPOSIT / WITHDRAWAL) เป็นทิศทาง
+      - สรุปแยกตาม (บัญชีเจ้าของ, บัญชีคู่โอน)
+
+    คืนค่า dict: inflow, outflow (DataFrame มีคอลัมน์ 'ทั้งสองทาง'), owners (list), main_account (str)
+    """
     work = df.copy()
     work['_amt'] = pd.to_numeric(work['ยอดเงิน'], errors='coerce').fillna(0)
     work['_cnt'] = pd.to_numeric(work['จำนวนครั้ง'], errors='coerce').fillna(1)
@@ -209,42 +219,69 @@ def build_flow_tables(df, main_account=None):
     src_key = work['หมายเลขบัญชีต้นทาง'].map(_account_key)
     dst_key = work['หมายเลขบัญชีปลายทาง'].map(_account_key)
 
+    use_owner = bool(owner_col) and owner_col in work.columns and work[owner_col].map(_clean_text).ne('').any()
+    if use_owner:
+        work['_owner'] = work[owner_col].map(_display_acc).replace('', UNKNOWN_ACC)
+        work['_owner_name'] = work[owner_name_col].map(_clean_text) if owner_name_col in work.columns else ''
+        owner_key = work[owner_col].map(_account_key)
+        direction = work[direction_col].astype(str).str.upper() if direction_col in work.columns else pd.Series('', index=work.index)
+        has_amt = work['_amt'] != 0
+        inflow_rows = work[(direction == 'DEPOSIT') & has_amt & (src_key != owner_key)]
+        outflow_rows = work[direction.str.startswith('WITHDRAW') & has_amt & (dst_key != owner_key)]
+        owners = sorted(work['_owner'].unique())
+        main_account = ', '.join(owners)
+    else:
+        main_account = _clean_text(main_account) or detect_main_account(df)
+        main_key = _account_key(main_account)
+        if main_key:
+            inflow_rows = work[(dst_key == main_key) & (src_key != main_key)]
+            outflow_rows = work[(src_key == main_key) & (dst_key != main_key)]
+        else:
+            inflow_rows = outflow_rows = work.iloc[0:0]
+        owners = [main_account] if main_account else []
+
+    multi_owner = use_owner and len(owners) > 1
+    group_keys = (['_owner'] if multi_owner else []) + ['_acc']
+    base_cols = ['เลขบัญชี', 'ธนาคาร', 'ชื่อบัญชี', 'ยอดเงิน', 'จำนวนครั้ง', 'วันแรก', 'วันสุดท้าย']
+    out_cols = (['บัญชีหลัก', 'ชื่อบัญชีหลัก'] if multi_owner else []) + base_cols
+
     def summarize(part, bank_col, acc_col, name_col):
-        cols = ['เลขบัญชี', 'ธนาคาร', 'ชื่อบัญชี', 'ยอดเงิน', 'จำนวนครั้ง', 'วันแรก', 'วันสุดท้าย']
         if part.empty:
-            return pd.DataFrame(columns=cols)
+            return pd.DataFrame(columns=out_cols)
         part = part.copy()
-        # รวมเลขบัญชีที่เขียนต่างกัน (มีขีด / เว้นวรรค / .0) ให้เป็นบัญชีเดียวกัน แต่ยังคงเลข 0 นำหน้าไว้
-        def display_acc(v):
-            t = re.sub(r'\.0$', '', _clean_text(v))
-            compact = re.sub(r'[\s-]', '', t)
-            return compact if compact.isdigit() else t
-        part['_acc'] = part[acc_col].map(display_acc).replace('', UNKNOWN_ACC)
+        part['_acc'] = part[acc_col].map(_display_acc).replace('', UNKNOWN_ACC)
         # ใช้ dict เพราะชื่อคอลัมน์ภาษาไทยบางคำ (เช่น "จำนวนครั้ง") ถูก Python แปลงรูปเมื่อเขียนเป็น keyword ตรง ๆ
-        table = part.groupby('_acc', sort=False).agg(**{
+        spec = {
             'ธนาคาร': (bank_col, _mode_text),
             'ชื่อบัญชี': (name_col, _mode_text),
             'ยอดเงิน': ('_amt', 'sum'),
             'จำนวนครั้ง': ('_cnt', 'sum'),
             'วันแรก': ('_date', 'min'),
             'วันสุดท้าย': ('_date', 'max'),
-        }).reset_index().rename(columns={'_acc': 'เลขบัญชี'})
-        return table.sort_values(['ยอดเงิน', 'จำนวนครั้ง'], ascending=False).reset_index(drop=True)[cols]
-
-    if main_key:
-        inflow_rows = work[(dst_key == main_key) & (src_key != main_key)]
-        outflow_rows = work[(src_key == main_key) & (dst_key != main_key)]
-    else:
-        inflow_rows = outflow_rows = work.iloc[0:0]
+        }
+        if multi_owner:
+            spec['ชื่อบัญชีหลัก'] = ('_owner_name', _mode_text)
+        table = part.groupby(group_keys, sort=False).agg(**spec).reset_index()
+        table = table.rename(columns={'_acc': 'เลขบัญชี', '_owner': 'บัญชีหลัก'})
+        sort_by = (['บัญชีหลัก'] if multi_owner else []) + ['ยอดเงิน', 'จำนวนครั้ง']
+        ascending = ([True] if multi_owner else []) + [False, False]
+        return table.sort_values(sort_by, ascending=ascending).reset_index(drop=True)[out_cols]
 
     inflow = summarize(inflow_rows, 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง')
     outflow = summarize(outflow_rows, 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง')
-    both = (set(inflow['เลขบัญชี']) & set(outflow['เลขบัญชี'])) - {UNKNOWN_ACC}
-    return {'inflow': inflow, 'outflow': outflow, 'both': both, 'main_account': main_account}
 
-def write_pivot_sheet(writer, df, main_account=None, main_account_name='', sheet_name='Pivot'):
+    # บัญชีที่มีทั้งโอนเข้าและรับโอนออก (กรณีหลายบัญชีหลัก เทียบภายในบัญชีหลักเดียวกัน)
+    key_cols = (['บัญชีหลัก'] if multi_owner else []) + ['เลขบัญชี']
+    keys = lambda t: set(map(tuple, t[key_cols].values.tolist()))
+    both = (keys(inflow) & keys(outflow)) - {k for k in keys(inflow) if k[-1] == UNKNOWN_ACC}
+    for t in (inflow, outflow):
+        t['ทั้งสองทาง'] = [tuple(k) in both for k in t[key_cols].values.tolist()]
+    return {'inflow': inflow, 'outflow': outflow, 'both_count': len(both),
+            'owners': owners, 'multi_owner': multi_owner, 'main_account': main_account}
+
+def write_pivot_sheet(writer, df, main_account=None, main_account_name='', sheet_name='Pivot', **flow_kwargs):
     """เขียนชีท Pivot: ตารางโอนเข้า (ซ้าย) และโอนออก (ขวา) เรียงตามยอดเงินมากไปน้อย"""
-    flows = build_flow_tables(df, main_account)
+    flows = build_flow_tables(df, main_account, **flow_kwargs)
     wb = writer.book
     ws = wb.add_worksheet(sheet_name)
 
@@ -268,55 +305,66 @@ def write_pivot_sheet(writer, df, main_account=None, main_account_name='', sheet
             'mark': F(border=1, align='center', bold=True, font_color='#C55A11', **extra),
         }
 
-    acc_label = flows['main_account'] + (f' {main_account_name}' if main_account_name else '')
+    if flows['multi_owner']:
+        acc_label = f"{len(flows['owners'])} บัญชี ({flows['main_account']})"
+    else:
+        acc_label = flows['main_account'] + (f' {main_account_name}' if main_account_name else '')
     ws.write(0, 0, f'สรุปบัญชีคู่โอน (Pivot ขาเข้า - ขาออก) บัญชีหลัก: {acc_label}', f_title)
     ws.write(1, 0, 'ที่มา: ชีท Cleaned Data · เรียงตามยอดเงินจากมากไปน้อย · ✓ แถวสีส้ม = บัญชีที่มีทั้งโอนเข้าและรับโอนออก · ชื่อบัญชีใช้ชื่อที่พบบ่อยที่สุดของเลขบัญชีนั้น', f_sub)
 
-    headers = ['ลำดับ', 'เลขบัญชี', 'ธนาคาร', 'ชื่อบัญชี', 'ยอดเงิน (บาท)', 'จำนวนครั้ง', 'วันแรก', 'วันสุดท้าย', 'เข้า-ออก\nทั้งสองทาง']
-    widths  = [7, 16, 10, 40, 16, 10, 12, 12, 11]
+    # (หัวคอลัมน์, ความกว้าง, ชนิด, คอลัมน์ข้อมูล)
+    spec = [('ลำดับ', 7, 'int', None)]
+    if flows['multi_owner']:
+        spec += [('บัญชีหลัก', 16, 'txt', 'บัญชีหลัก'), ('ชื่อบัญชีหลัก', 28, 'txt', 'ชื่อบัญชีหลัก')]
+    spec += [('เลขบัญชี', 16, 'txt', 'เลขบัญชี'), ('ธนาคาร', 10, 'txt', 'ธนาคาร'), ('ชื่อบัญชี', 40, 'txt', 'ชื่อบัญชี'),
+             ('ยอดเงิน (บาท)', 16, 'num', 'ยอดเงิน'), ('จำนวนครั้ง', 10, 'cnt', 'จำนวนครั้ง'),
+             ('วันแรก', 12, 'date', 'วันแรก'), ('วันสุดท้าย', 12, 'date', 'วันสุดท้าย'),
+             ('เข้า-ออก\nทั้งสองทาง', 11, 'mark', 'ทั้งสองทาง')]
+    width = len(spec)
+    pos = {s[3]: i for i, s in enumerate(spec)}
     blocks = [(flows['inflow'], 0, 'โอนเข้า (บัญชีต้นทางที่โอนเข้าบัญชีหลัก)', '#2F5597'),
-              (flows['outflow'], len(headers) + 1, 'โอนออก (บัญชีปลายทางที่บัญชีหลักโอนออกไป)', '#C55A11')]
+              (flows['outflow'], width + 1, 'โอนออก (บัญชีปลายทางที่บัญชีหลักโอนออกไป)', '#C55A11')]
 
     for table, c0, title, color in blocks:
-        ws.merge_range(3, c0, 3, c0 + len(headers) - 1, title, F(bold=True, font_size=12, font_color='#FFFFFF', bg_color=color, align='center'))
-        for i, (h, w) in enumerate(zip(headers, widths)):
+        ws.merge_range(3, c0, 3, c0 + width - 1, title, F(bold=True, font_size=12, font_color='#FFFFFF', bg_color=color, align='center'))
+        for i, (h, w, _, _) in enumerate(spec):
             ws.write(4, c0 + i, h, f_head)
             ws.set_column(c0 + i, c0 + i, w)
 
         n = len(table)
         first, last = 6, 6 + max(n, 1) - 1
-        col = lambda i: xl_col(c0 + i)
+        rng = lambda key: f'{xl_col(c0 + pos[key])}{first + 1}:{xl_col(c0 + pos[key])}{last + 1}'
+        for i in range(width):
+            ws.write(5, c0 + i, '', f_total_lbl)
         ws.write(5, c0, 'รวมทั้งหมด', f_total_lbl)
-        ws.write(5, c0 + 1, '', f_total_lbl)
-        ws.write(5, c0 + 2, '', f_total_lbl)
-        ws.write(5, c0 + 3, f'{n:,} บัญชี', f_total_lbl)
-        ws.write_formula(5, c0 + 4, f'=SUM({col(4)}{first + 1}:{col(4)}{last + 1})', f_total_num, float(table['ยอดเงิน'].sum()) if n else 0)
-        ws.write_formula(5, c0 + 5, f'=SUM({col(5)}{first + 1}:{col(5)}{last + 1})', f_total_int, float(table['จำนวนครั้ง'].sum()) if n else 0)
-        ws.write(5, c0 + 6, '', f_total_lbl)
-        ws.write(5, c0 + 7, '', f_total_lbl)
-        n_both = int(table['เลขบัญชี'].isin(flows['both']).sum()) if n else 0
-        ws.write_formula(5, c0 + 8, f'=COUNTIF({col(8)}{first + 1}:{col(8)}{last + 1},"✓")', f_total_int, n_both)
+        ws.write(5, c0 + pos['ชื่อบัญชี'], f'{n:,} บัญชี', f_total_lbl)
+        ws.write_formula(5, c0 + pos['ยอดเงิน'], f'=SUM({rng("ยอดเงิน")})', f_total_num, float(table['ยอดเงิน'].sum()) if n else 0)
+        ws.write_formula(5, c0 + pos['จำนวนครั้ง'], f'=SUM({rng("จำนวนครั้ง")})', f_total_int, float(table['จำนวนครั้ง'].sum()) if n else 0)
+        ws.write_formula(5, c0 + pos['ทั้งสองทาง'], f'=COUNTIF({rng("ทั้งสองทาง")},"✓")', f_total_int, int(table['ทั้งสองทาง'].sum()) if n else 0)
 
         if n == 0:
             ws.write(first, c0, 'ไม่พบรายการ', styles['row']['txt'])
             continue
 
-        for k, (acc, bank, name, amount, count, d_first, d_last) in enumerate(table.itertuples(index=False, name=None)):
+        for k, rec in enumerate(table.to_dict('records')):
             r = first + k
-            is_both = acc in flows['both']
-            st_ = styles['both'] if is_both else styles['row']
-            ws.write_number(r, c0, k + 1, st_['int'])
-            ws.write_string(r, c0 + 1, str(acc), st_['txt'])
-            ws.write_string(r, c0 + 2, str(bank), st_['txt'])
-            ws.write_string(r, c0 + 3, str(name), st_['txt'])
-            ws.write_number(r, c0 + 4, float(amount), st_['num'])
-            ws.write_number(r, c0 + 5, float(count), st_['cnt'])
-            for j, d in ((6, d_first), (7, d_last)):
-                if pd.notna(d): ws.write_datetime(r, c0 + j, d.to_pydatetime(), st_['date'])
-                else: ws.write_blank(r, c0 + j, None, st_['date'])
-            ws.write_string(r, c0 + 8, '✓' if is_both else '', st_['mark'])
+            st_ = styles['both'] if rec['ทั้งสองทาง'] else styles['row']
+            for i, (_, _, kind, col) in enumerate(spec):
+                c = c0 + i
+                if col is None:
+                    ws.write_number(r, c, k + 1, st_[kind])
+                elif kind == 'mark':
+                    ws.write_string(r, c, '✓' if rec[col] else '', st_[kind])
+                elif kind == 'date':
+                    d = rec[col]
+                    if pd.notna(d): ws.write_datetime(r, c, d.to_pydatetime(), st_[kind])
+                    else: ws.write_blank(r, c, None, st_[kind])
+                elif kind in ('num', 'cnt'):
+                    ws.write_number(r, c, float(rec[col]), st_[kind])
+                else:
+                    ws.write_string(r, c, str(rec[col]), st_[kind])
 
-    ws.set_column(len(headers), len(headers), 3)   # ช่องว่างคั่นระหว่างสองตาราง
+    ws.set_column(width, width, 3)   # ช่องว่างคั่นระหว่างสองตาราง
     ws.set_row(4, 30)
     ws.freeze_panes(6, 0)
     return flows
@@ -955,7 +1003,12 @@ def process_gsb(excel_file):
 # ส่วนประมวลผล PRASAN (ระบบประสาน)
 # ==========================================
 def process_prasan(excel_file):
-    df_for_clean = pd.read_excel(excel_file, sheet_name=0, header=0)
+    # อ่านคอลัมน์เลขบัญชีเป็นข้อความ เพื่อไม่ให้เลข 0 นำหน้าหาย (เช่น 0222222222 → 222222222)
+    header_cols = pd.read_excel(excel_file, sheet_name=0, nrows=0).columns
+    acc_dtypes = {c: str for c in header_cols if str(c).lower().strip() in ('fromaccountno', 'toaccountno', 'accountno')}
+    excel_file.seek(0)
+    df_for_clean = pd.read_excel(excel_file, sheet_name=0, header=0, dtype=acc_dtypes)
+    excel_file.seek(0)
     df_original_copy = pd.read_excel(excel_file, sheet_name=0, header=None)
 
     expected_headers = ['txdate', 'txtime', 'frombankcode', 'fromaccountno', 'fromaccountname', 
@@ -1072,6 +1125,12 @@ def process_prasan(excel_file):
     df_cleaned['ยอดเงิน'] = df_cleaned['ยอดเงิน'].replace([np.inf, -np.inf], np.nan)
     df_cleaned['วันที่ทำรายการ'] = df_cleaned['วันที่ทำรายการ'].astype(object).where(pd.notna(df_cleaned['วันที่ทำรายการ']), '')
     
+    # บัญชีเจ้าของรายแถว (ไฟล์ประสานอาจรวมหลายบัญชีไว้ในไฟล์เดียว) ใช้สำหรับชีท Pivot เท่านั้น ไม่เขียนลง Cleaned Data
+    if 'accountno' in df_for_clean.columns:
+        df_cleaned['_owner_acc'] = clean_string_or_nan(df_for_clean['accountno'], is_account_no=True)
+        df_cleaned['_owner_name'] = clean_string_or_nan(df_for_clean['accountname']) if 'accountname' in df_for_clean.columns else ''
+    owner_kwargs = {'owner_col': '_owner_acc', 'owner_name_col': '_owner_name', 'direction_col': source_column}
+
     df_cleaned_ready = df_cleaned.copy()
 
     output = io.BytesIO()
@@ -1103,10 +1162,175 @@ def process_prasan(excel_file):
                 else:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
         finalize_cleaned_sheet(ws_cleaned, len(df_cleaned_ready), len(new_columns))
-        flows = write_pivot_sheet(writer, df_cleaned_ready, sheet_name='Sheet3 (Pivot)')
+        flows = write_pivot_sheet(writer, df_cleaned_ready, sheet_name='Sheet3 (Pivot)', **owner_kwargs)
         
     df_cleaned_ready.attrs['main_account'] = flows['main_account']
+    df_cleaned_ready.attrs['flow_kwargs'] = owner_kwargs
     return output.getvalue(), df_cleaned_ready, warn_msg
+
+# ==========================================
+# ส่วนประมวลผล BAY (ธนาคารกรุงศรีอยุธยา - รายการจากระบบ Switch / TLF)
+# ==========================================
+BAY_BANK_CODES = {'002': 'BBL', '004': 'KBANK', '006': 'KTB', '011': 'TTB', '014': 'SCB', '017': 'CITI', '022': 'CIMBT',
+                  '024': 'UOB', '025': 'BAY', '030': 'GSB', '033': 'GHB', '034': 'BAAC', '065': 'TBANK', '066': 'IBANK',
+                  '067': 'TISCO', '069': 'KKP', '070': 'ICBCT', '071': 'TCRB', '073': 'LHBA'}
+
+# รหัส TRANS_TYPE ที่พบในไฟล์ (ตีความจากรูปแบบข้อมูล หากพบรหัสใหม่ระบบจะแสดงเป็น "รหัส xx")
+BAY_TRANS_TYPES = {'10': 'ถอนเงินสด ATM', '41': 'โอนเงินภายในธนาคาร', '47': 'ฝากเงินสด',
+                   '48': 'โอนเงินต่างธนาคาร/พร้อมเพย์', '49': 'โอนเงินต่างธนาคาร',
+                   '50': 'ชำระเงิน/บิล', '55': 'ชำระเงิน/บิล ต่างธนาคาร'}
+
+BAY_CHANNELS = {'MSIM': 'Mobile Banking', 'ENET': 'Internet Banking', 'EATM': 'ATM', 'EKCS': 'ตู้ฝากเงิน (Kiosk)', 'ELTS': 'ตู้ฝากเงิน'}
+
+def process_bay(excel_file, main_acc_num="", main_acc_name=""):
+    df_raw = pd.read_excel(excel_file, sheet_name=0, header=None, dtype=str)
+
+    # หาแถวหัวตาราง (แถวที่มีคำว่า PROCESS_DATE)
+    header_idx = next((i for i, row in df_raw.iterrows()
+                       if row.astype(str).str.upper().str.contains('PROCESS_DATE', na=False).any()), None)
+    if header_idx is None:
+        raise ValueError("⚠️ ไม่พบหัวตาราง PROCESS_DATE กรุณาตรวจสอบว่าเป็นไฟล์รายการธุรกรรมของธนาคารกรุงศรี (BAY)")
+
+    df = df_raw.iloc[header_idx + 1:].copy()
+    df.columns = [str(c).strip().upper() for c in df_raw.iloc[header_idx].values]
+    df = df.loc[:, [c for c in df.columns if c not in ('', 'NAN')]].reset_index(drop=True)
+
+    expected_headers = ['PROCESS_DATE', 'PROCESS_TIME', 'TRANS_TYPE', 'FROM_CHANNEL', 'RESPONSE_CODE', 'REQUEST_AMT',
+                        'CARD_BANK', 'FR_AC_NUMBER', 'FR_AC_NAME', 'TO_BANK', 'TO_AC_NUMBER', 'TO_AC_NAME']
+    missing, renamed = fix_and_validate_headers(df, expected_headers)
+    if missing:
+        raise ValueError(f"⚠️ รูปแบบหัวตารางไม่ถูกต้อง! \nระบบต้องการคอลัมน์: {', '.join(missing)} \nกรุณาแก้ไขชื่อหัวตารางในไฟล์ Excel ให้ตรงตามรูปแบบก่อนทำรายการ")
+    warn_parts = ["ระบบได้ทำการปรับแก้หัวตารางอัตโนมัติ:\n" + " | ".join(renamed)] if renamed else []
+
+    def txt(col):
+        return df[col].map(_clean_text) if col in df.columns else pd.Series([''] * len(df))
+
+    def clean_acc(val):
+        s = re.sub(r'\.0$', '', _clean_text(val))
+        return '' if (s == '' or set(s) == {'0'}) else s     # 0000000000 = ไม่มีบัญชี (เช่น ฝากเงินสด)
+
+    def map_bank(code):
+        c = _clean_text(code)
+        if not c: return ''
+        c = c.zfill(3)[-3:]
+        return 'BAY' if c == '000' else BAY_BANK_CODES.get(c, c)   # TO_BANK 0000 = ภายในกรุงศรี
+
+    def parse_date(val):
+        # รองรับทั้ง 2025-01-31 (ค.ศ./พ.ศ.) และ 31/01/2568
+        v = _clean_text(val)
+        m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})', v)
+        if m:
+            y = int(m.group(1)); y = y - 543 if y > 2400 else y
+            return pd.Timestamp(year=y, month=int(m.group(2)), day=int(m.group(3)))
+        return pd.to_datetime(convert_buddhist_year_string(v), format='%d/%m/%Y', errors='coerce')
+
+    def fmt_time(t):
+        t = _clean_text(t).split('.')[0]
+        return f"{t.zfill(6)[:2]}:{t.zfill(6)[2:4]}:{t.zfill(6)[4:6]}" if t.isdigit() else t
+
+    # --- แยกรายการที่ไม่สำเร็จ (RESPONSE_CODE ไม่ใช่ 00) ออกเป็นชีทต่างหาก ---
+    resp = txt('RESPONSE_CODE')
+    ok_mask = resp.isin(['00', '0', '000', ''])
+    df_failed = df[~ok_mask].copy()
+    df = df[ok_mask].reset_index(drop=True)
+    if len(df_failed):
+        warn_parts.append(f"พบรายการที่ไม่สำเร็จ (RESPONSE_CODE ≠ 00) จำนวน {len(df_failed):,} รายการ ไม่นำมาคำนวณ แยกไว้ในชีท 'รายการไม่สำเร็จ'")
+
+    fr_acc = df['FR_AC_NUMBER'].map(clean_acc)
+    to_acc = df['TO_AC_NUMBER'].map(clean_acc)
+
+    # --- บัญชีหลัก: ใช้ที่ผู้ใช้กรอก ถ้าไม่กรอกใช้เลขบัญชีที่พบบ่อยที่สุด ---
+    if main_acc_num:
+        f_acc = str(main_acc_num).strip()
+    else:
+        all_acc = pd.concat([fr_acc, to_acc]); all_acc = all_acc[all_acc != '']
+        f_acc = all_acc.mode().iloc[0] if not all_acc.empty else ''
+    main_key = _account_key(f_acc)
+    is_out = fr_acc.map(_account_key) == main_key
+    is_in = (to_acc.map(_account_key) == main_key) & ~is_out
+    if main_acc_name:
+        f_name = str(main_acc_name).strip()
+    else:
+        f_name = _mode_text(pd.concat([txt('FR_AC_NAME')[is_out], txt('TO_AC_NAME')[is_in]]))
+
+    type_code = txt('TRANS_TYPE')
+    type_label = type_code.map(lambda c: BAY_TRANS_TYPES.get(c, f'รหัส {c}' if c else ''))
+    channel = txt('FROM_CHANNEL').map(lambda c: BAY_CHANNELS.get(c, c))
+    location = txt('TERM_LOCATION')
+    channel = np.where((txt('FROM_CHANNEL') == 'EATM') & (location != ''), channel + ' · ' + location, channel)
+
+    df_cleaned = pd.DataFrame({
+        'วันที่ทำรายการ': df['PROCESS_DATE'].map(parse_date),
+        'เวลาที่ทำรายการ': df['PROCESS_TIME'].map(fmt_time),
+        'ประเภทรายการ': type_label,
+        'ช่องทาง': channel,
+        'ชื่อธนาคารต้นทาง': df['CARD_BANK'].map(map_bank),
+        'หมายเลขบัญชีต้นทาง': fr_acc,
+        'ชื่อบัญชีต้นทาง': txt('FR_AC_NAME'),
+        'ชื่อธนาคารปลายทาง': df['TO_BANK'].map(map_bank),
+        'หมายเลขบัญชีปลายทาง': to_acc,
+        'ชื่อบัญชีปลายทาง': txt('TO_AC_NAME'),
+        'ยอดเงิน': pd.to_numeric(df['REQUEST_AMT'].astype(str).str.replace(',', ''), errors='coerce').fillna(0),
+        'จำนวนครั้ง': 1,
+    })
+
+    # เติมช่องว่างแบบเดียวกับธนาคารอื่น: ฝั่งที่ไม่มีบัญชี ใส่ประเภทรายการแทน (เช่น ถอนเงินสด ATM / ฝากเงินสด)
+    no_src = df_cleaned['หมายเลขบัญชีต้นทาง'] == ''
+    no_dst = df_cleaned['หมายเลขบัญชีปลายทาง'] == ''
+    df_cleaned.loc[no_src & is_in, 'หมายเลขบัญชีต้นทาง'] = df_cleaned['ประเภทรายการ']
+    df_cleaned.loc[no_src & is_in, 'ชื่อธนาคารต้นทาง'] = ''
+    df_cleaned.loc[no_dst & is_out, 'หมายเลขบัญชีปลายทาง'] = df_cleaned['ประเภทรายการ']
+    df_cleaned.loc[no_dst & is_out, 'ชื่อธนาคารปลายทาง'] = ''
+    # ชื่อบัญชีหลักที่ว่าง เติมให้ครบ
+    df_cleaned.loc[is_out & (df_cleaned['ชื่อบัญชีต้นทาง'] == ''), 'ชื่อบัญชีต้นทาง'] = f_name
+    df_cleaned.loc[is_in & (df_cleaned['ชื่อบัญชีปลายทาง'] == ''), 'ชื่อบัญชีปลายทาง'] = f_name
+
+    df_cleaned['_source_type'] = np.where(is_in, 'DEPOSIT', 'WITHDRAWAL')
+    df_cleaned['_sort_time'] = df_cleaned['เวลาที่ทำรายการ']
+    df_cleaned = df_cleaned.sort_values(['วันที่ทำรายการ', '_sort_time'], na_position='first', kind='stable').drop(columns='_sort_time').reset_index(drop=True)
+    df_cleaned['วันที่ทำรายการ'] = df_cleaned['วันที่ทำรายการ'].astype(object).where(pd.notna(df_cleaned['วันที่ทำรายการ']), '')
+
+    new_columns = NEW_COLUMNS.copy()
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_raw.to_excel(writer, sheet_name='Original', index=False, header=False)
+        ws_cleaned = writer.book.add_worksheet('Cleaned Data')
+
+        g_fmt = writer.book.add_format({'font_color': 'green', 'num_format': '#,##0.00'})
+        r_fmt = writer.book.add_format({'font_color': 'red', 'num_format': '#,##0.00'})
+        d_fmt = writer.book.add_format({'num_format': 'General'})
+        dt_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'})
+        t_fmt = writer.book.add_format({'num_format': '@'})
+
+        write_cleaned_header(writer.book, ws_cleaned, new_columns)
+
+        for r_num, r_data in df_cleaned.iterrows():
+            src = r_data['_source_type']
+            for c_num, c_name in enumerate(new_columns):
+                c_val = r_data[c_name]
+                if c_name == 'ยอดเงิน':
+                    ws_cleaned.write_number(r_num + 1, c_num, float(c_val), g_fmt if src == 'DEPOSIT' else r_fmt)
+                elif c_name == 'จำนวนครั้ง':
+                    ws_cleaned.write_number(r_num + 1, c_num, int(c_val), d_fmt)
+                elif c_name == 'วันที่ทำรายการ' and isinstance(c_val, (pd.Timestamp, datetime)):
+                    ws_cleaned.write_datetime(r_num + 1, c_num, c_val, dt_fmt)
+                elif c_name in ['หมายเลขบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']:
+                    ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
+                else:
+                    ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
+        finalize_cleaned_sheet(ws_cleaned, len(df_cleaned), len(new_columns))
+        write_pivot_sheet(writer, df_cleaned, f_acc, f_name)
+
+        if len(df_failed):
+            ws_failed = writer.book.add_worksheet('รายการไม่สำเร็จ')
+            write_cleaned_header(writer.book, ws_failed, list(df_failed.columns))
+            for r_num, row in enumerate(df_failed.itertuples(index=False), start=1):
+                for c_num, val in enumerate(row):
+                    ws_failed.write_string(r_num, c_num, _clean_text(val), t_fmt)
+            finalize_cleaned_sheet(ws_failed, len(df_failed), len(df_failed.columns))
+
+    df_cleaned.attrs['main_account'] = f_acc
+    return output.getvalue(), df_cleaned, "\n".join(warn_parts)
 
 # ==========================================
 # ส่วนประมวลผล SCB
@@ -1304,29 +1528,32 @@ def process_scb(excel_file, filename, main_acc_num, main_acc_name):
 # ==========================================
 # Main Controller (UI)
 # ==========================================
-def show_flow_summary(df, main_account=None, top_n=10):
+def show_flow_summary(df, main_account=None, top_n=10, **flow_kwargs):
     """แสดงสรุป Pivot ขาเข้า-ขาออกบนหน้าเว็บ (ข้อมูลชุดเดียวกับชีท Pivot ในไฟล์ Excel)"""
-    flows = build_flow_tables(df, main_account)
+    flows = build_flow_tables(df, main_account, **flow_kwargs)
     inflow, outflow = flows['inflow'], flows['outflow']
 
     st.subheader("สรุปบัญชีคู่โอน (Pivot ขาเข้า - ขาออก)")
     if not flows['main_account']:
         st.warning("ไม่พบเลขบัญชีหลัก จึงสรุปทิศทางการโอนไม่ได้")
         return
-    st.caption(f"บัญชีหลัก: {flows['main_account']} · ตารางเต็มอยู่ในชีท Pivot ของไฟล์ที่ดาวน์โหลด")
+    if flows['multi_owner']:
+        st.caption(f"ไฟล์นี้มีบัญชีหลัก {len(flows['owners'])} บัญชี: {flows['main_account']} · ตารางเต็มแยกตามบัญชีหลักอยู่ในชีท Pivot ของไฟล์ที่ดาวน์โหลด")
+    else:
+        st.caption(f"บัญชีหลัก: {flows['main_account']} · ตารางเต็มอยู่ในชีท Pivot ของไฟล์ที่ดาวน์โหลด")
 
     c1, c2, c3 = st.columns(3)
     c1.metric(f"🟢 โอนเข้า · {len(inflow):,} บัญชี / {int(inflow['จำนวนครั้ง'].sum()):,} ครั้ง", f"{inflow['ยอดเงิน'].sum():,.2f} ฿")
     c2.metric(f"🔴 โอนออก · {len(outflow):,} บัญชี / {int(outflow['จำนวนครั้ง'].sum()):,} ครั้ง", f"{outflow['ยอดเงิน'].sum():,.2f} ฿")
-    c3.metric("🔁 บัญชีเข้า-ออกทั้งสองทาง", f"{len(flows['both']):,} บัญชี")
+    c3.metric("🔁 บัญชีเข้า-ออกทั้งสองทาง", f"{flows['both_count']:,} บัญชี")
 
     def top_table(table):
-        view = table.head(top_n).copy()
+        view = table.sort_values('ยอดเงิน', ascending=False).head(top_n).copy()
         view.insert(0, 'ลำดับ', range(1, len(view) + 1))
         view['ยอดเงิน'] = view['ยอดเงิน'].map(lambda v: f"{v:,.2f}")
         view['จำนวนครั้ง'] = view['จำนวนครั้ง'].astype(int)
-        view['เข้า-ออก'] = view['เลขบัญชี'].isin(flows['both']).map({True: '✓', False: ''})
-        return view.drop(columns=['วันแรก', 'วันสุดท้าย'])
+        view['เข้า-ออก'] = view['ทั้งสองทาง'].map({True: '✓', False: ''})
+        return view.drop(columns=['วันแรก', 'วันสุดท้าย', 'ทั้งสองทาง', 'ชื่อบัญชีหลัก'], errors='ignore')
 
     tab_in, tab_out = st.tabs([f"โอนเข้า สูงสุด {top_n} อันดับ", f"โอนออก สูงสุด {top_n} อันดับ"])
     with tab_in:
@@ -1355,6 +1582,9 @@ def process_and_allow_download(excel_file, bank_name, filename, main_acc_num="",
         elif "TTB" in bank_name:
             st.info("กำลังประมวลผลข้อมูลตามโครงสร้างของธนาคารทหารไทยธนชาต (TTB)...")
             processed_data, df_show, warn_msg = process_ttb(excel_file)
+        elif "BAY" in bank_name:
+            st.info("กำลังประมวลผลข้อมูลตามโครงสร้างของธนาคารกรุงศรีอยุธยา (BAY)...")
+            processed_data, df_show, warn_msg = process_bay(excel_file, main_acc_num, main_acc_name)
         elif "BBL" in bank_name:
             st.info("กำลังประมวลผลข้อมูลตามโครงสร้างของธนาคารกรุงเทพ (BBL)...")
             processed_data, df_show, warn_msg = process_bbl(excel_file)
@@ -1373,12 +1603,12 @@ def process_and_allow_download(excel_file, bank_name, filename, main_acc_num="",
 
         st.success(f"ประมวลผลสำเร็จ จำนวน {len(df_show):,} รายการ")
         st.write("ตัวอย่างข้อมูลที่ประมวลผลแล้ว (5 แถวแรก):")
-        display_df = df_show.drop(columns=['_source_type']) if '_source_type' in df_show.columns else df_show
+        display_df = df_show.drop(columns=[c for c in df_show.columns if str(c).startswith('_')])
         preview = display_df.head().copy()
         preview['วันที่ทำรายการ'] = preview['วันที่ทำรายการ'].apply(lambda v: v.strftime('%d/%m/%Y') if isinstance(v, (pd.Timestamp, datetime)) and pd.notna(v) else v)
         st.dataframe(preview, use_container_width=True, hide_index=True)
 
-        show_flow_summary(display_df, df_show.attrs.get('main_account'))
+        show_flow_summary(df_show, df_show.attrs.get('main_account'), **df_show.attrs.get('flow_kwargs', {}))
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_name = "PRASAN" if "PRASAN" in bank_name else bank_name.split()[0]
@@ -1410,6 +1640,10 @@ def main():
     selected_bank = st.selectbox("ระบุธนาคารเจ้าของไฟล์:", list(BANK_PASSWORDS.keys()))
 
     main_acc_num, main_acc_name = "", ""
+    if "BAY" in selected_bank:
+        st.info("ระบุบัญชีหลักได้ (ไม่บังคับ) หากเว้นว่าง ระบบจะใช้เลขบัญชีที่ปรากฏบ่อยที่สุดในไฟล์")
+        main_acc_num = st.text_input("หมายเลขบัญชีหลัก (10 หลัก):", max_chars=10)
+        main_acc_name = st.text_input("ชื่อบัญชีหลัก:")
     if any(bank in selected_bank for bank in ["KTB", "SCB"]):
         st.info("โปรดระบุข้อมูลบัญชีหลักเพื่อใช้เป็นข้อมูลอ้างอิง หรือใช้ประมวลผลทิศทางการโอนเงิน")
         main_acc_num = st.text_input("หมายเลขบัญชีหลัก (10 หลัก):", max_chars=10)
