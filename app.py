@@ -1626,10 +1626,6 @@ def main():
     selected_bank = st.selectbox("ระบุธนาคารเจ้าของไฟล์:", list(BANK_PASSWORDS.keys()))
 
     main_acc_num, main_acc_name = "", ""
-    if "BAY" in selected_bank:
-        st.info("ระบุบัญชีหลักได้ (ไม่บังคับ) หากเว้นว่าง ระบบจะใช้เลขบัญชีที่ปรากฏบ่อยที่สุดในไฟล์")
-        main_acc_num = st.text_input("หมายเลขบัญชีหลัก (10 หลัก):", max_chars=10)
-        main_acc_name = st.text_input("ชื่อบัญชีหลัก:")
     if any(bank in selected_bank for bank in ["KTB", "SCB"]):
         st.info("โปรดระบุข้อมูลบัญชีหลักเพื่อใช้เป็นข้อมูลอ้างอิง หรือใช้ประมวลผลทิศทางการโอนเงิน")
         main_acc_num = st.text_input("หมายเลขบัญชีหลัก (10 หลัก):", max_chars=10)
@@ -1642,18 +1638,28 @@ def main():
         file_bytes = io.BytesIO(uploaded_file.read())
         filename = uploaded_file.name
         is_encrypted = False
+        read_error = None
         
         if not filename.lower().endswith('.csv'):
             try:
                 pd.read_excel(file_bytes, nrows=1)
                 file_bytes.seek(0)
-            except Exception:
+            except Exception as e:
+                read_error = e
                 try:
                     file_bytes.seek(0)
                     office_file = msoffcrypto.OfficeFile(file_bytes)
-                    is_encrypted = office_file.is_encrypted
+                    is_encrypted = office_file.is_encrypted()   # ต้องเรียกเป็นฟังก์ชัน ไม่เช่นนั้นจะได้ค่า True เสมอ
                 except Exception:
                     is_encrypted = False
+                file_bytes.seek(0)
+
+        if read_error is not None and not is_encrypted:
+            if isinstance(read_error, ImportError) or 'xlrd' in str(read_error):
+                st.error("อ่านไฟล์ .xls ไม่ได้ เพราะเครื่องนี้ยังไม่ได้ติดตั้งไลบรารี xlrd \nกรุณารันคำสั่ง  pip install xlrd  แล้วเปิดโปรแกรมใหม่")
+            else:
+                st.error(f"ไม่สามารถอ่านไฟล์นี้ได้: {read_error}")
+            return
 
         if is_encrypted:
             st.warning("ตรวจพบการเข้ารหัสไฟล์ (Password Protected)")
