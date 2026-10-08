@@ -8,26 +8,71 @@ from datetime import datetime
 import difflib
 
 # 1. การตั้งค่าหน้าเว็บ
-st.set_page_config(page_title="ระบบแปลงข้อมูล", layout="centered")
+st.set_page_config(page_title="ระบบแปลงข้อมูล", page_icon="🏦", layout="centered")
 
-# 2. การตกแต่งด้วย CSS 
+# 2. การตกแต่งด้วย CSS (โทนกรมท่า-ทอง)
 custom_css = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
-.stApp { background-color: #09101C; font-family: 'Kanit', sans-serif; }
-h1, h2, h3 { color: #D0A83A !important; font-family: 'Kanit', sans-serif !important; font-weight: 500; }
-p, label { color: #F8FAFC !important; font-family: 'Kanit', sans-serif !important; }
-.stButton>button { background-color: #D0A83A !important; color: #000000 !important; border-radius: 5px; border: none; font-weight: 600; width: 100%; }
-.stButton>button:hover { background-color: #E6C153 !important; }
-[data-testid="stFileUploadDropzone"] { background-color: #131E32 !important; border: 2px dashed #D0A83A !important; }
-[data-testid="stFileUploadDropzone"] * { color: #F8FAFC !important; }
-.stSelectbox > div > div { background-color: #131E32 !important; border-color: #D0A83A !important; }
-div[data-baseweb="select"] span { color: #F8FAFC !important; }
+:root {
+    --bg: #09101C; --panel: #131E32; --panel-2: #1A2740; --line: #26375A;
+    --gold: #D0A83A; --gold-hi: #E6C153; --text: #F8FAFC; --muted: #94A3B8;
+}
+.stApp { background: radial-gradient(1200px 500px at 50% -10%, #14213A 0%, var(--bg) 60%); font-family: 'Kanit', sans-serif; }
+.block-container { padding-top: 2.2rem; max-width: 860px; }
+h1, h2, h3 { color: var(--gold) !important; font-family: 'Kanit', sans-serif !important; font-weight: 500; }
+h3 { font-size: 1.15rem !important; padding-bottom: .35rem; border-bottom: 1px solid var(--line); margin-top: .6rem !important; }
+p, label, li { color: var(--text) !important; font-family: 'Kanit', sans-serif !important; }
+
+/* Hero */
+.hero { background: linear-gradient(135deg, var(--panel-2) 0%, var(--panel) 100%); border: 1px solid var(--line);
+        border-left: 4px solid var(--gold); border-radius: 12px; padding: 1.1rem 1.4rem; margin-bottom: 1.4rem; }
+.hero h1 { margin: 0 !important; padding: 0 !important; font-size: 1.75rem !important; letter-spacing: .5px; }
+.hero p { margin: .25rem 0 0 0; color: var(--muted) !important; font-size: .95rem; font-weight: 300; }
+.bank-chips { margin-top: .7rem; display: flex; flex-wrap: wrap; gap: .35rem; }
+.bank-chips span { font-size: .75rem; color: var(--gold) !important; border: 1px solid #5B4A1C; background: #1F1A0E;
+                   border-radius: 999px; padding: .1rem .6rem; }
+
+/* ปุ่ม */
+.stButton>button, .stDownloadButton>button { background-color: var(--gold) !important; color: #000 !important; border-radius: 8px;
+    border: none; font-weight: 600; width: 100%; padding: .6rem 1rem; transition: background-color .15s ease; }
+.stButton>button:hover, .stDownloadButton>button:hover { background-color: var(--gold-hi) !important; }
+.stButton>button p, .stDownloadButton>button p { color: #000 !important; }
+
+/* ช่องกรอก / อัปโหลด / เลือก */
+[data-testid="stFileUploadDropzone"], [data-testid="stFileUploaderDropzone"] { background-color: var(--panel) !important; border: 2px dashed var(--gold) !important; border-radius: 10px; }
+[data-testid="stFileUploadDropzone"] *, [data-testid="stFileUploaderDropzone"] * { color: var(--text) !important; }
+.stSelectbox > div > div, .stTextInput input { background-color: var(--panel) !important; border-color: var(--line) !important; color: var(--text) !important; border-radius: 8px; }
+.stTextInput input:focus { border-color: var(--gold) !important; }
+div[data-baseweb="select"] span, div[data-baseweb="select"] > div > div { color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; }
+[data-testid="stFileUploadDropzone"] button, [data-testid="stFileUploaderDropzone"] button { background: var(--gold) !important; border: none !important; }
+[data-testid="stFileUploadDropzone"] button *, [data-testid="stFileUploaderDropzone"] button * { color: #000 !important; }
+[data-testid="stFileChip"], [data-testid="stFileUploaderFile"] { background: var(--panel-2) !important; border: 1px solid var(--line) !important; }
+[data-testid="stFileChip"] *, [data-testid="stFileUploaderFile"] * { color: var(--text) !important; }
+[data-testid="stSelectbox"] input, [data-testid="stSelectbox"] svg, [data-testid="stSelectbox"] div[data-baseweb="select"] * { color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; opacity: 1 !important; }
+header[data-testid="stHeader"] { background: transparent; }
 div[data-baseweb="popover"] ul li, div[data-baseweb="popover"] ul li span { color: #000000 !important; }
-div[data-baseweb="popover"] ul li:hover { background-color: #E6C153 !important; color: #000000 !important; }
+div[data-baseweb="popover"] ul li:hover { background-color: var(--gold-hi) !important; color: #000000 !important; }
+
+/* การ์ดสรุป (Metric) */
+[data-testid="stMetric"] { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .7rem .9rem; }
+[data-testid="stMetricLabel"] p { color: var(--muted) !important; font-size: .85rem; }
+[data-testid="stMetricValue"] { color: var(--text) !important; font-size: 1.35rem !important; font-weight: 500; }
+
+/* แท็บ + ตาราง */
+.stTabs [data-baseweb="tab-list"] { gap: .3rem; }
+.stTabs [data-baseweb="tab"] { background: var(--panel); border-radius: 8px 8px 0 0; padding: .35rem .9rem; }
+.stTabs [aria-selected="true"] { background: var(--panel-2); border-bottom: 2px solid var(--gold) !important; }
+.stTabs [data-baseweb="tab"] p { color: var(--text) !important; }
+[data-testid="stDataFrame"] { border: 1px solid var(--line); border-radius: 8px; }
+[data-testid="stCaptionContainer"] p { color: var(--muted) !important; }
+hr { border-color: var(--line) !important; }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
+
+# คอลัมน์มาตรฐานของ Cleaned Data (ใช้ร่วมกันทุกธนาคาร)
+NEW_COLUMNS = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
 
 # 3. ฐานข้อมูลรหัสผ่านมาตรฐาน
 BANK_PASSWORDS = {
@@ -96,7 +141,194 @@ def convert_buddhist_year_string(dt):
         elif 20 < year_part < 100: year_christian = 2000 + year_part
         else: year_christian = year_part
         return f"{d:02d}/{m:02d}/{year_christian}"
-    return dt 
+    return dt
+
+# ==========================================
+# เครื่องมือตกแต่งชีท Cleaned Data (ใช้ร่วมกันทุกธนาคาร)
+# ==========================================
+def write_cleaned_header(workbook, worksheet, columns):
+    """เขียนหัวตาราง Cleaned Data แบบมีสีพื้นและเส้นขอบ"""
+    fmt_header = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter',
+                                      'border': 1, 'bg_color': '#1F3864', 'font_color': '#FFFFFF'})
+    for c, v in enumerate(columns):
+        worksheet.write(0, c, v, fmt_header)
+
+def finalize_cleaned_sheet(worksheet, n_rows, n_cols):
+    """ปรับความกว้างคอลัมน์ ตรึงแถวหัวตาราง และเปิดตัวกรอง"""
+    worksheet.autofit()
+    worksheet.freeze_panes(1, 0)
+    if n_rows > 0:
+        worksheet.autofilter(0, 0, n_rows, n_cols - 1)
+
+# ==========================================
+# ระบบสรุปบัญชีคู่โอน (Pivot ขาเข้า - ขาออก)
+# ==========================================
+UNKNOWN_ACC = '(ไม่ระบุ)'
+
+def _clean_text(val):
+    return '' if pd.isna(val) or str(val).strip().lower() in ['nan', 'none', 'nat', ''] else str(val).strip()
+
+def _account_key(val):
+    """แปลงเลขบัญชีให้อยู่ในรูปเทียบกันได้ (ตัดขีด ช่องว่าง .0 และเลข 0 นำหน้า)"""
+    s = re.sub(r'\.0$', '', _clean_text(val))
+    digits = re.sub(r'[\s-]', '', s)
+    return digits.lstrip('0') if digits.isdigit() else s
+
+def _mode_text(series):
+    s = series.map(_clean_text)
+    s = s[s != '']
+    return s.mode().iloc[0] if not s.empty else ''
+
+def _parse_dates(series):
+    def to_text(v):
+        if isinstance(v, (pd.Timestamp, datetime)) and pd.notna(v):
+            return v.strftime('%d/%m/%Y')
+        return str(convert_buddhist_year_string(v)).strip()
+    return pd.to_datetime(series.apply(to_text), format='%d/%m/%Y', errors='coerce')
+
+def detect_main_account(df):
+    """หาเลขบัญชีหลักจากเลขบัญชีที่ปรากฏบ่อยที่สุดทั้งฝั่งต้นทางและปลายทาง"""
+    accs = pd.concat([df['หมายเลขบัญชีต้นทาง'], df['หมายเลขบัญชีปลายทาง']]).map(_clean_text)
+    accs = accs[accs.str.replace(r'[\s-]', '', regex=True).str.fullmatch(r'\d{6,}')]
+    return accs.mode().iloc[0] if not accs.empty else ''
+
+def build_flow_tables(df, main_account=None):
+    """
+    สร้างตารางสรุปบัญชีคู่โอนจาก Cleaned Data
+    - โอนเข้า: แถวที่บัญชีปลายทางเป็นบัญชีหลัก → สรุปตามบัญชีต้นทาง
+    - โอนออก: แถวที่บัญชีต้นทางเป็นบัญชีหลัก → สรุปตามบัญชีปลายทาง
+    คืนค่า dict: inflow, outflow (DataFrame), both (set บัญชีที่มีทั้งเข้าและออก), main_account
+    """
+    main_account = _clean_text(main_account) or detect_main_account(df)
+    main_key = _account_key(main_account)
+
+    work = df.copy()
+    work['_amt'] = pd.to_numeric(work['ยอดเงิน'], errors='coerce').fillna(0)
+    work['_cnt'] = pd.to_numeric(work['จำนวนครั้ง'], errors='coerce').fillna(1)
+    work['_date'] = _parse_dates(work['วันที่ทำรายการ'])
+    src_key = work['หมายเลขบัญชีต้นทาง'].map(_account_key)
+    dst_key = work['หมายเลขบัญชีปลายทาง'].map(_account_key)
+
+    def summarize(part, bank_col, acc_col, name_col):
+        cols = ['เลขบัญชี', 'ธนาคาร', 'ชื่อบัญชี', 'ยอดเงิน', 'จำนวนครั้ง', 'วันแรก', 'วันสุดท้าย']
+        if part.empty:
+            return pd.DataFrame(columns=cols)
+        part = part.copy()
+        # รวมเลขบัญชีที่เขียนต่างกัน (มีขีด / เว้นวรรค / .0) ให้เป็นบัญชีเดียวกัน แต่ยังคงเลข 0 นำหน้าไว้
+        def display_acc(v):
+            t = re.sub(r'\.0$', '', _clean_text(v))
+            compact = re.sub(r'[\s-]', '', t)
+            return compact if compact.isdigit() else t
+        part['_acc'] = part[acc_col].map(display_acc).replace('', UNKNOWN_ACC)
+        # ใช้ dict เพราะชื่อคอลัมน์ภาษาไทยบางคำ (เช่น "จำนวนครั้ง") ถูก Python แปลงรูปเมื่อเขียนเป็น keyword ตรง ๆ
+        table = part.groupby('_acc', sort=False).agg(**{
+            'ธนาคาร': (bank_col, _mode_text),
+            'ชื่อบัญชี': (name_col, _mode_text),
+            'ยอดเงิน': ('_amt', 'sum'),
+            'จำนวนครั้ง': ('_cnt', 'sum'),
+            'วันแรก': ('_date', 'min'),
+            'วันสุดท้าย': ('_date', 'max'),
+        }).reset_index().rename(columns={'_acc': 'เลขบัญชี'})
+        return table.sort_values(['ยอดเงิน', 'จำนวนครั้ง'], ascending=False).reset_index(drop=True)[cols]
+
+    if main_key:
+        inflow_rows = work[(dst_key == main_key) & (src_key != main_key)]
+        outflow_rows = work[(src_key == main_key) & (dst_key != main_key)]
+    else:
+        inflow_rows = outflow_rows = work.iloc[0:0]
+
+    inflow = summarize(inflow_rows, 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง')
+    outflow = summarize(outflow_rows, 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง')
+    both = (set(inflow['เลขบัญชี']) & set(outflow['เลขบัญชี'])) - {UNKNOWN_ACC}
+    return {'inflow': inflow, 'outflow': outflow, 'both': both, 'main_account': main_account}
+
+def write_pivot_sheet(writer, df, main_account=None, main_account_name='', sheet_name='Pivot'):
+    """เขียนชีท Pivot: ตารางโอนเข้า (ซ้าย) และโอนออก (ขวา) เรียงตามยอดเงินมากไปน้อย"""
+    flows = build_flow_tables(df, main_account)
+    wb = writer.book
+    ws = wb.add_worksheet(sheet_name)
+
+    base = {'font_name': 'Tahoma', 'font_size': 10, 'valign': 'vcenter'}
+    F = lambda **kw: wb.add_format({**base, **kw})
+    f_title = F(bold=True, font_size=14, font_color='#1F3864')
+    f_sub   = F(italic=True, font_color='#595959')
+    f_head  = F(bold=True, align='center', border=1, bg_color='#D9E1F2', text_wrap=True)
+    f_total_lbl = F(bold=True, border=1, bg_color='#FFF2CC')
+    f_total_num = F(bold=True, border=1, bg_color='#FFF2CC', num_format='#,##0.00')
+    f_total_int = F(bold=True, border=1, bg_color='#FFF2CC', num_format='#,##0', align='center')
+    styles = {}
+    for key, bg in (('row', None), ('both', '#FCE4D6')):
+        extra = {'bg_color': bg} if bg else {}
+        styles[key] = {
+            'int':  F(border=1, align='center', num_format='0', **extra),
+            'txt':  F(border=1, num_format='@', **extra),
+            'num':  F(border=1, num_format='#,##0.00', **extra),
+            'cnt':  F(border=1, num_format='#,##0', align='center', **extra),
+            'date': F(border=1, num_format='dd/mm/yyyy', align='center', **extra),
+            'mark': F(border=1, align='center', bold=True, font_color='#C55A11', **extra),
+        }
+
+    acc_label = flows['main_account'] + (f' {main_account_name}' if main_account_name else '')
+    ws.write(0, 0, f'สรุปบัญชีคู่โอน (Pivot ขาเข้า - ขาออก) บัญชีหลัก: {acc_label}', f_title)
+    ws.write(1, 0, 'ที่มา: ชีท Cleaned Data · เรียงตามยอดเงินจากมากไปน้อย · ✓ แถวสีส้ม = บัญชีที่มีทั้งโอนเข้าและรับโอนออก · ชื่อบัญชีใช้ชื่อที่พบบ่อยที่สุดของเลขบัญชีนั้น', f_sub)
+
+    headers = ['ลำดับ', 'เลขบัญชี', 'ธนาคาร', 'ชื่อบัญชี', 'ยอดเงิน (บาท)', 'จำนวนครั้ง', 'วันแรก', 'วันสุดท้าย', 'เข้า-ออก\nทั้งสองทาง']
+    widths  = [7, 16, 10, 40, 16, 10, 12, 12, 11]
+    blocks = [(flows['inflow'], 0, 'โอนเข้า (บัญชีต้นทางที่โอนเข้าบัญชีหลัก)', '#2F5597'),
+              (flows['outflow'], len(headers) + 1, 'โอนออก (บัญชีปลายทางที่บัญชีหลักโอนออกไป)', '#C55A11')]
+
+    for table, c0, title, color in blocks:
+        ws.merge_range(3, c0, 3, c0 + len(headers) - 1, title, F(bold=True, font_size=12, font_color='#FFFFFF', bg_color=color, align='center'))
+        for i, (h, w) in enumerate(zip(headers, widths)):
+            ws.write(4, c0 + i, h, f_head)
+            ws.set_column(c0 + i, c0 + i, w)
+
+        n = len(table)
+        first, last = 6, 6 + max(n, 1) - 1
+        col = lambda i: xl_col(c0 + i)
+        ws.write(5, c0, 'รวมทั้งหมด', f_total_lbl)
+        ws.write(5, c0 + 1, '', f_total_lbl)
+        ws.write(5, c0 + 2, '', f_total_lbl)
+        ws.write(5, c0 + 3, f'{n:,} บัญชี', f_total_lbl)
+        ws.write_formula(5, c0 + 4, f'=SUM({col(4)}{first + 1}:{col(4)}{last + 1})', f_total_num, float(table['ยอดเงิน'].sum()) if n else 0)
+        ws.write_formula(5, c0 + 5, f'=SUM({col(5)}{first + 1}:{col(5)}{last + 1})', f_total_int, float(table['จำนวนครั้ง'].sum()) if n else 0)
+        ws.write(5, c0 + 6, '', f_total_lbl)
+        ws.write(5, c0 + 7, '', f_total_lbl)
+        n_both = int(table['เลขบัญชี'].isin(flows['both']).sum()) if n else 0
+        ws.write_formula(5, c0 + 8, f'=COUNTIF({col(8)}{first + 1}:{col(8)}{last + 1},"✓")', f_total_int, n_both)
+
+        if n == 0:
+            ws.write(first, c0, 'ไม่พบรายการ', styles['row']['txt'])
+            continue
+
+        for k, (acc, bank, name, amount, count, d_first, d_last) in enumerate(table.itertuples(index=False, name=None)):
+            r = first + k
+            is_both = acc in flows['both']
+            st_ = styles['both'] if is_both else styles['row']
+            ws.write_number(r, c0, k + 1, st_['int'])
+            ws.write_string(r, c0 + 1, str(acc), st_['txt'])
+            ws.write_string(r, c0 + 2, str(bank), st_['txt'])
+            ws.write_string(r, c0 + 3, str(name), st_['txt'])
+            ws.write_number(r, c0 + 4, float(amount), st_['num'])
+            ws.write_number(r, c0 + 5, float(count), st_['cnt'])
+            for j, d in ((6, d_first), (7, d_last)):
+                if pd.notna(d): ws.write_datetime(r, c0 + j, d.to_pydatetime(), st_['date'])
+                else: ws.write_blank(r, c0 + j, None, st_['date'])
+            ws.write_string(r, c0 + 8, '✓' if is_both else '', st_['mark'])
+
+    ws.set_column(len(headers), len(headers), 3)   # ช่องว่างคั่นระหว่างสองตาราง
+    ws.set_row(4, 30)
+    ws.freeze_panes(6, 0)
+    return flows
+
+def xl_col(idx):
+    """แปลงเลขคอลัมน์ (เริ่ม 0) เป็นตัวอักษร Excel เช่น 0 → A"""
+    name = ''
+    idx += 1
+    while idx:
+        idx, rem = divmod(idx - 1, 26)
+        name = chr(65 + rem) + name
+    return name
 
 # ==========================================
 # ส่วนประมวลผล KBANK
@@ -163,7 +395,7 @@ def process_kbank(excel_file):
         mask_fill_dest = is_dest_empty & (deposit_numeric != 0)
         df_for_clean.loc[mask_fill_dest, ['ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง']] = ['KBANK', kbank_acc_num, kbank_acc_name]
 
-    new_columns = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_columns = NEW_COLUMNS.copy()
     df_cleaned = pd.DataFrame(columns=new_columns)
     
     for col in [c for c in new_columns if c not in ['ยอดเงิน', 'จำนวนครั้ง']]:
@@ -197,7 +429,7 @@ def process_kbank(excel_file):
         dt_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'}) 
         t_fmt = writer.book.add_format({'num_format': '@'})
 
-        for c, v in enumerate(new_columns): ws_cleaned.write(0, c, v, d_fmt)
+        write_cleaned_header(writer.book, ws_cleaned, new_columns)
 
         for r_num, r_data in df_cleaned_ready.iterrows():
             src = r_data['_source_type']
@@ -213,8 +445,10 @@ def process_kbank(excel_file):
                 elif c_name in ['หมายเลขบัญชีต้นทาง', 'หมายเลขบัญชีปลายทาง']:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
                 else: ws_cleaned.write(r_num + 1, c_num, c_val, d_fmt)
-        ws_cleaned.autofit()
+        finalize_cleaned_sheet(ws_cleaned, len(df_cleaned_ready), len(new_columns))
+        write_pivot_sheet(writer, df_cleaned_ready, kbank_acc_num, kbank_acc_name)
         
+    df_cleaned_ready.attrs['main_account'] = kbank_acc_num
     return output.getvalue(), df_cleaned_ready, warn_msg
 
 # ==========================================
@@ -234,7 +468,7 @@ def process_ktb(excel_file, account_number, account_name):
         
     warn_msg = "ระบบได้ทำการปรับแก้หัวตารางอัตโนมัติ:\n" + " | ".join(renamed) if renamed else ""
 
-    new_columns = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_columns = NEW_COLUMNS.copy()
     df_cleaned = pd.DataFrame(index=df_data_map.index, columns=new_columns)
 
     def force_clean_text(val): return '' if str(val).strip().lower() in ['nan', 'none', 'nat', ''] else str(val).strip()
@@ -282,14 +516,13 @@ def process_ktb(excel_file, account_number, account_name):
         df_full_raw.to_excel(writer, sheet_name='Original', index=False, header=False)
         ws = writer.book.add_worksheet('Cleaned Data')
         
-        fmt_head = writer.book.add_format({'bold': True, 'align': 'center', 'border': 1, 'bg_color': '#D9E1F2'})
         fmt_txt  = writer.book.add_format({'num_format': '@'}) 
         fmt_green = writer.book.add_format({'num_format': '#,##0.00', 'font_color': '#006400', 'bold': True})
         fmt_red   = writer.book.add_format({'num_format': '#,##0.00', 'font_color': '#FF0000', 'bold': True})
         fmt_normal = writer.book.add_format({'num_format': '#,##0.00'})
         fmt_date = writer.book.add_format({'num_format': '@', 'align': 'center'})
 
-        for col, val in enumerate(df_cleaned.columns): ws.write(0, col, val, fmt_head)
+        write_cleaned_header(writer.book, ws, df_cleaned.columns)
 
         for r, row in df_cleaned.iterrows():
             acc_src = str(row['หมายเลขบัญชีต้นทาง']).strip()
@@ -303,8 +536,10 @@ def process_ktb(excel_file, account_number, account_name):
                 elif col_name == 'จำนวนครั้ง': ws.write_number(r+1, c, float(val), fmt_normal)
                 elif col_name == 'วันที่ทำรายการ': ws.write_string(r+1, c, str(val), fmt_date)
                 else: ws.write_string(r+1, c, force_clean_text(val), fmt_txt)
-        ws.autofit()
+        finalize_cleaned_sheet(ws, len(df_cleaned), len(df_cleaned.columns))
+        write_pivot_sheet(writer, df_cleaned, account_number, account_name)
 
+    df_cleaned.attrs['main_account'] = account_number
     return output.getvalue(), df_cleaned, warn_msg
 
 # ==========================================
@@ -379,7 +614,7 @@ def process_ttb(excel_file):
             try: clean_df.at[idx, 'ยอดเงิน'] = float(str(wit).replace(',', ''))
             except: clean_df.at[idx, 'ยอดเงิน'] = str(wit)
 
-    new_columns = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_columns = NEW_COLUMNS.copy()
     clean_df = clean_df.reindex(columns=new_columns + ['_source_type'])
 
     output = io.BytesIO()
@@ -392,7 +627,7 @@ def process_ttb(excel_file):
         d_fmt = writer.book.add_format({'num_format': 'General'})
         t_fmt = writer.book.add_format({'num_format': '@'})
 
-        for c, v in enumerate(new_columns): ws_cleaned.write(0, c, v, d_fmt)
+        write_cleaned_header(writer.book, ws_cleaned, new_columns)
 
         for r_num, r_data in clean_df.iterrows():
             src = r_data['_source_type']
@@ -406,8 +641,10 @@ def process_ttb(excel_file):
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
                 else:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
-        ws_cleaned.autofit()
+        finalize_cleaned_sheet(ws_cleaned, len(clean_df), len(new_columns))
+        flows = write_pivot_sheet(writer, clean_df, sheet_name='Sheet3_Pivot')
         
+    clean_df.attrs['main_account'] = flows['main_account']
     return output.getvalue(), clean_df, warn_msg
 
 # ==========================================
@@ -531,9 +768,9 @@ def process_bbl(excel_file):
         dt_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'}) 
         t_fmt = writer.book.add_format({'num_format': '@'})
 
-        new_cols = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+        new_cols = NEW_COLUMNS.copy()
         
-        for c, v in enumerate(new_cols): ws_cleaned.write(0, c, v, d_fmt)
+        write_cleaned_header(writer.book, ws_cleaned, new_cols)
 
         for r_num, r_data in df_new.iterrows():
             src = r_data['_source_type']
@@ -550,8 +787,10 @@ def process_bbl(excel_file):
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
                 else:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
-        ws_cleaned.autofit()
+        finalize_cleaned_sheet(ws_cleaned, len(df_new), len(new_cols))
+        write_pivot_sheet(writer, df_new, top_acc_no, top_acc_name, sheet_name='Sheet3 (Pivot)')
         
+    df_new.attrs['main_account'] = top_acc_no
     return output.getvalue(), df_new, warn_msg
 
 # ==========================================
@@ -678,9 +917,9 @@ def process_gsb(excel_file):
         dt_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'}) 
         t_fmt = writer.book.add_format({'num_format': '@'})
 
-        new_cols = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+        new_cols = NEW_COLUMNS.copy()
         
-        for c, v in enumerate(new_cols): ws_cleaned.write(0, c, v, d_fmt)
+        write_cleaned_header(writer.book, ws_cleaned, new_cols)
 
         top_acc_compare = str(top_acc_no).lstrip('0')
 
@@ -706,8 +945,10 @@ def process_gsb(excel_file):
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
                 else:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
-        ws_cleaned.autofit()
+        finalize_cleaned_sheet(ws_cleaned, len(df_new), len(new_cols))
+        write_pivot_sheet(writer, df_new, top_acc_no, top_acc_name, sheet_name='Sheet3 (Pivot)')
         
+    df_new.attrs['main_account'] = top_acc_no
     return output.getvalue(), df_new, warn_msg
 
 # ==========================================
@@ -753,7 +994,7 @@ def process_prasan(excel_file):
             return code 
         return code_series.apply(mapper)
 
-    new_columns = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_columns = NEW_COLUMNS.copy()
     df_cleaned = pd.DataFrame(columns=new_columns)
 
     mapping = {
@@ -844,7 +1085,7 @@ def process_prasan(excel_file):
         dt_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'}) 
         t_fmt = writer.book.add_format({'num_format': '@'})
 
-        for c, v in enumerate(new_columns): ws_cleaned.write(0, c, v, d_fmt)
+        write_cleaned_header(writer.book, ws_cleaned, new_columns)
 
         for r_num, r_data in df_cleaned_ready.iterrows():
             src = r_data[source_column]
@@ -861,8 +1102,10 @@ def process_prasan(excel_file):
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
                 else:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
-        ws_cleaned.autofit()
+        finalize_cleaned_sheet(ws_cleaned, len(df_cleaned_ready), len(new_columns))
+        flows = write_pivot_sheet(writer, df_cleaned_ready, sheet_name='Sheet3 (Pivot)')
         
+    df_cleaned_ready.attrs['main_account'] = flows['main_account']
     return output.getvalue(), df_cleaned_ready, warn_msg
 
 # ==========================================
@@ -991,7 +1234,7 @@ def process_scb(excel_file, filename, main_acc_num, main_acc_name):
         int_df['TRAN_AMT'] = [x[1] for x in ind_amt_list]
         int_df['DESCRIPTION'] = df['Description']
 
-    new_cols = ['วันที่ทำรายการ', 'เวลาที่ทำรายการ', 'ประเภทรายการ', 'ช่องทาง', 'ชื่อธนาคารต้นทาง', 'หมายเลขบัญชีต้นทาง', 'ชื่อบัญชีต้นทาง', 'ชื่อธนาคารปลายทาง', 'หมายเลขบัญชีปลายทาง', 'ชื่อบัญชีปลายทาง', 'ยอดเงิน', 'จำนวนครั้ง']
+    new_cols = NEW_COLUMNS.copy()
     
     combined_data = []
     for _, row in int_df.iterrows():
@@ -1035,7 +1278,7 @@ def process_scb(excel_file, filename, main_acc_num, main_acc_name):
         dt_fmt = writer.book.add_format({'num_format': 'dd/mm/yyyy'}) 
         t_fmt = writer.book.add_format({'num_format': '@'})
 
-        for c, v in enumerate(new_cols): ws_cleaned.write(0, c, v, d_fmt)
+        write_cleaned_header(writer.book, ws_cleaned, new_cols)
 
         for r_num, r_data in res_all.iterrows():
             src = r_data['_source_type']
@@ -1052,13 +1295,45 @@ def process_scb(excel_file, filename, main_acc_num, main_acc_name):
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), t_fmt)
                 else:
                     ws_cleaned.write_string(r_num + 1, c_num, str(c_val), d_fmt)
-        ws_cleaned.autofit()
+        finalize_cleaned_sheet(ws_cleaned, len(res_all), len(new_cols))
+        write_pivot_sheet(writer, res_all, f_acc, f_name, sheet_name='Sheet3 (Pivot)')
         
+    res_all.attrs['main_account'] = f_acc
     return output.getvalue(), res_all, ""
 
 # ==========================================
 # Main Controller (UI)
 # ==========================================
+def show_flow_summary(df, main_account=None, top_n=10):
+    """แสดงสรุป Pivot ขาเข้า-ขาออกบนหน้าเว็บ (ข้อมูลชุดเดียวกับชีท Pivot ในไฟล์ Excel)"""
+    flows = build_flow_tables(df, main_account)
+    inflow, outflow = flows['inflow'], flows['outflow']
+
+    st.subheader("สรุปบัญชีคู่โอน (Pivot ขาเข้า - ขาออก)")
+    if not flows['main_account']:
+        st.warning("ไม่พบเลขบัญชีหลัก จึงสรุปทิศทางการโอนไม่ได้")
+        return
+    st.caption(f"บัญชีหลัก: {flows['main_account']} · ตารางเต็มอยู่ในชีท Pivot ของไฟล์ที่ดาวน์โหลด")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"🟢 โอนเข้า · {len(inflow):,} บัญชี / {int(inflow['จำนวนครั้ง'].sum()):,} ครั้ง", f"{inflow['ยอดเงิน'].sum():,.2f} ฿")
+    c2.metric(f"🔴 โอนออก · {len(outflow):,} บัญชี / {int(outflow['จำนวนครั้ง'].sum()):,} ครั้ง", f"{outflow['ยอดเงิน'].sum():,.2f} ฿")
+    c3.metric("🔁 บัญชีเข้า-ออกทั้งสองทาง", f"{len(flows['both']):,} บัญชี")
+
+    def top_table(table):
+        view = table.head(top_n).copy()
+        view.insert(0, 'ลำดับ', range(1, len(view) + 1))
+        view['ยอดเงิน'] = view['ยอดเงิน'].map(lambda v: f"{v:,.2f}")
+        view['จำนวนครั้ง'] = view['จำนวนครั้ง'].astype(int)
+        view['เข้า-ออก'] = view['เลขบัญชี'].isin(flows['both']).map({True: '✓', False: ''})
+        return view.drop(columns=['วันแรก', 'วันสุดท้าย'])
+
+    tab_in, tab_out = st.tabs([f"โอนเข้า สูงสุด {top_n} อันดับ", f"โอนออก สูงสุด {top_n} อันดับ"])
+    with tab_in:
+        st.dataframe(top_table(inflow), use_container_width=True, hide_index=True)
+    with tab_out:
+        st.dataframe(top_table(outflow), use_container_width=True, hide_index=True)
+
 def process_and_allow_download(excel_file, bank_name, filename, main_acc_num="", main_acc_name=""):
     st.write("---")
     st.subheader("3. การประมวลผล (Processing)")
@@ -1096,9 +1371,14 @@ def process_and_allow_download(excel_file, bank_name, filename, main_acc_num="",
         if warn_msg:
             st.warning(warn_msg)
 
+        st.success(f"ประมวลผลสำเร็จ จำนวน {len(df_show):,} รายการ")
         st.write("ตัวอย่างข้อมูลที่ประมวลผลแล้ว (5 แถวแรก):")
         display_df = df_show.drop(columns=['_source_type']) if '_source_type' in df_show.columns else df_show
-        st.dataframe(display_df.head())
+        preview = display_df.head().copy()
+        preview['วันที่ทำรายการ'] = preview['วันที่ทำรายการ'].apply(lambda v: v.strftime('%d/%m/%Y') if isinstance(v, (pd.Timestamp, datetime)) and pd.notna(v) else v)
+        st.dataframe(preview, use_container_width=True, hide_index=True)
+
+        show_flow_summary(display_df, df_show.attrs.get('main_account'))
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_name = "PRASAN" if "PRASAN" in bank_name else bank_name.split()[0]
@@ -1117,7 +1397,14 @@ def process_and_allow_download(excel_file, bank_name, filename, main_acc_num="",
         return
 
 def main():
-    st.title("DATA CLEANSING SYSTEM")
+    bank_chips = "".join(f"<span>{b.split('(')[-1].rstrip(')')}</span>" for b in BANK_PASSWORDS)
+    st.markdown(f"""
+    <div class="hero">
+        <h1>DATA CLEANSING SYSTEM</h1>
+        <p>แปลงรายการเดินบัญชีธนาคารให้อยู่ในรูปแบบมาตรฐาน พร้อมสรุปบัญชีคู่โอนขาเข้า - ขาออก (Pivot)</p>
+        <div class="bank-chips">{bank_chips}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.subheader("1. เลือกธนาคาร")
     selected_bank = st.selectbox("ระบุธนาคารเจ้าของไฟล์:", list(BANK_PASSWORDS.keys()))
