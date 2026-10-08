@@ -1228,14 +1228,7 @@ def process_bay(excel_file, main_acc_num="", main_acc_name=""):
         t = _clean_text(t).split('.')[0]
         return f"{t.zfill(6)[:2]}:{t.zfill(6)[2:4]}:{t.zfill(6)[4:6]}" if t.isdigit() else t
 
-    # --- แยกรายการที่ไม่สำเร็จ (RESPONSE_CODE ไม่ใช่ 00) ออกเป็นชีทต่างหาก ---
-    resp = txt('RESPONSE_CODE')
-    ok_mask = resp.isin(['00', '0', '000', ''])
-    df_failed = df[~ok_mask].copy()
-    df = df[ok_mask].reset_index(drop=True)
-    if len(df_failed):
-        warn_parts.append(f"พบรายการที่ไม่สำเร็จ (RESPONSE_CODE ≠ 00) จำนวน {len(df_failed):,} รายการ ไม่นำมาคำนวณ แยกไว้ในชีท 'รายการไม่สำเร็จ'")
-
+    # นำทุกรายการเข้า Cleaned Data และ Pivot (รวมรายการที่ RESPONSE_CODE ไม่ใช่ 00) ตามที่ผู้ใช้กำหนด
     fr_acc = df['FR_AC_NUMBER'].map(clean_acc)
     to_acc = df['TO_AC_NUMBER'].map(clean_acc)
 
@@ -1321,13 +1314,6 @@ def process_bay(excel_file, main_acc_num="", main_acc_name=""):
         finalize_cleaned_sheet(ws_cleaned, len(df_cleaned), len(new_columns))
         write_pivot_sheet(writer, df_cleaned, f_acc, f_name)
 
-        if len(df_failed):
-            ws_failed = writer.book.add_worksheet('รายการไม่สำเร็จ')
-            write_cleaned_header(writer.book, ws_failed, list(df_failed.columns))
-            for r_num, row in enumerate(df_failed.itertuples(index=False), start=1):
-                for c_num, val in enumerate(row):
-                    ws_failed.write_string(r_num, c_num, _clean_text(val), t_fmt)
-            finalize_cleaned_sheet(ws_failed, len(df_failed), len(df_failed.columns))
 
     df_cleaned.attrs['main_account'] = f_acc
     return output.getvalue(), df_cleaned, "\n".join(warn_parts)
